@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=run_gtdb_k_range
-#SBATCH --time=1:00:00
+#SBATCH --time=31:00:00
 #SBATCH --partition=shared
 #SBATCH --account=blangme2
-#SBATCH --mem=12G
+#SBATCH --mem=64G
 #SBATCH --ntasks-per-node=1
-#SBATCH --mail-type=fail
+#SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=shwang45@jhu.edu
 
 # Run array job: sbatch gtdb_k_range_slurm.sh k_min k_max input_paths output_path output_prefix [threads]
