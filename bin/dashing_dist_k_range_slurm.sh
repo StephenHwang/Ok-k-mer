@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=run_gtdb_k_range
+#SBATCH --job-name=run_dashing_dist
 #SBATCH --time=31:00:00
 #SBATCH --partition=shared
 #SBATCH --account=blangme2
@@ -8,11 +8,13 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=shwang45@jhu.edu
 
+set -euxo pipefail
+
 # Run array job: sbatch gtdb_k_range_slurm.sh k_min k_max input_paths output_path output_prefix [threads]
 # Example usage with k_min=5 and k_max=64:
 # > sbatch gtdb_k_range_slurm.sh 5 64 input_paths.txt /path/to/output test_prefix 8
 
-echo "Starting moni job $SLURM_JOBID, task ID: $SLURM_ARRAY_TASK_ID"
+echo "Starting moni job $SLURM_JOBID"
 echo "Executing on the machine:" $(hostname)
 
 # Inputs:
