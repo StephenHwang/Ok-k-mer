@@ -156,6 +156,24 @@ def process_data(tree_path, dashing_dir_path):
     return tree_dict, dashing_dfs, merged_df
 
 
+def initial_corr(merged_df, k_low=5, k_high=32):
+    """
+    Find best single k by Spearman correlation vs tree_distance (minimize rho, same objective as 3-k grid).
+    Returns the full table and (best_k, corr, pval).
+    """
+    n = k_high - k_low + 1
+    results_matrix = np.zeros((n, 3))
+    for i, k in enumerate(range(k_low, k_high + 1)):
+        k_rank = merged_df[f"k{k}_distance"].rank()
+        corr, pval = spearmanr(k_rank, merged_df["tree_distance"])
+        results_matrix[i, :] = [k, corr, pval]
+    min_idx = int(np.nanargmin(results_matrix[:, 1]))
+    best_k = int(results_matrix[min_idx, 0])
+    best_corr = float(results_matrix[min_idx, 1])
+    best_pval = float(results_matrix[min_idx, 2])
+    return results_matrix, (best_k, best_corr, best_pval)
+
+
 def _single_3k_grid_spearman(args):
     """Helper for parallel 3-k grid search."""
     merged_df, ks_main, ks, ws, k1_idx, k2_idx, k3_idx, w1_idx, w2_idx = args
@@ -202,7 +220,7 @@ def run_full_3k_grid_corr_k_main_parallel(
     num_threads=None,
 ):
     """
-    Limited grid search: user supplies k1_main, and ks are restricted to ±s of that k1 (optionally clipped by k_low/k_high).
+    Limited grid search: k1_main centers the k1 window (±s, clipped by k_low/k_high); often from initial_corr.
 
     Full grid search: pick 3 ks (k1, k2, k3), and two weights (w1, w2).
     The 3-way weighted rank: w1*k1_rank + w2*k2_rank + (1-w1-w2)*k3_rank.
@@ -259,13 +277,7 @@ def main():
         help="Directory containing distance_k*.txt (dashing) files",
     )
     p.add_argument("--tree-path", required=True, help="Path to Newick tree (.nwk)")
-    p.add_argument(
-        "--k-main",
-        type=int,
-        required=True,
-        help="Center k for the primary k window (k1 is searched within k_main ± s)",
-    )
-    p.add_argument("--s", type=int, default=3, help="Radius around k-main for k1 search (default 3)")
+    p.add_argument("--s", type=int, default=3, help="Radius around data-driven k_main for k1 search (default 3)")
     p.add_argument("--k-low", type=int, default=6, help="Minimum k for k2/k3 grid (default 6)")
     p.add_argument("--k-high", type=int, default=40, help="Maximum k for k2/k3 grid (default 40)")
     p.add_argument("--w-step", type=float, default=0.1, help="Weight grid step (default 0.1)")
@@ -298,10 +310,19 @@ def main():
 
     _tree_dict, _dashing_dfs, merged_df = process_data(args.tree_path, args.dir_path)
 
+    _initial_table, (k_main, single_k_corr, single_k_pval) = initial_corr(
+        merged_df, k_low=args.k_low, k_high=args.k_high
+    )
+    print(
+        f"Initial single-k search (k in [{args.k_low}, {args.k_high}]): "
+        f"best k={k_main}, spearman_rho={single_k_corr}, p-value={single_k_pval}",
+        flush=True,
+    )
+
     results_matrix, min_val, k1_min, k2_min, k3_min, w1_min, w2_min, w3_min, _min_dup = (
         run_full_3k_grid_corr_k_main_parallel(
             merged_df,
-            args.k_main,
+            k_main,
             s=args.s,
             k_low=args.k_low,
             k_high=args.k_high,
@@ -320,7 +341,9 @@ def main():
         "min_spearman_corr": float(min_val),
         "dir_path": os.path.abspath(args.dir_path),
         "tree_path": os.path.abspath(args.tree_path),
-        "k_main": args.k_main,
+        "k_main": int(k_main),
+        "initial_single_k_spearman": float(single_k_corr),
+        "initial_single_k_pvalue": float(single_k_pval),
         "s": args.s,
         "k_low": args.k_low,
         "k_high": args.k_high,
