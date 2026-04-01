@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=run_grid_three_search
-#SBATCH --time=01:00:00
+#SBATCH --time=04:00:00
 #SBATCH --partition=shared
 #SBATCH --account=blangme2
 #SBATCH --mem=16G
@@ -40,13 +40,8 @@ DIR_PATH="$2"
 K_MAIN="$3"
 shift 3
 
-# BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-# GRID_SEARCH_PY="${BIN_DIR}/grid_search.py"
-# PYTHON="${PYTHON:-${HOME}/miniconda3/envs/python310/bin/python}"
 GRID_SEARCH_PY="./grid_search.py"
 PYTHON="${HOME}/miniconda3/envs/python310/bin/python"
-
-# ls -l ${PYTHON}
 
 if [ ! -f "${GRID_SEARCH_PY}" ]; then
   echo "grid_search.py not found at ${GRID_SEARCH_PY}" >&2
