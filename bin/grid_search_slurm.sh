@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=run_grid_three_search
-#SBATCH --time=04:00:00
+#SBATCH --time=12:00:00
 #SBATCH --partition=shared
 #SBATCH --account=blangme2
-#SBATCH --mem=16G
+#SBATCH --mem=32G
 #SBATCH --ntasks-per-node=1
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=shwang45@jhu.edu
