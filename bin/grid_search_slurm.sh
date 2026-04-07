@@ -7,6 +7,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=shwang45@jhu.edu
+# Note: cyano took ~16hours, otherwise <12
 
 set -euxo pipefail
 
