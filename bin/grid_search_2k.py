@@ -155,29 +155,11 @@ def process_data(tree_path, dashing_dir_path):
     return tree_dict, dashing_dfs, merged_df
 
 
-# def initial_corr(merged_df, k_low=5, k_high=32):
-#     """
-#     Find best single k by Spearman correlation vs tree_distance (minimize rho, same objective as 3-k grid).
-#     Returns the full table and (best_k, corr, pval).
-#     """
-#     n = k_high - k_low + 1
-#     results_matrix = np.zeros((n, 3))
-#     for i, k in enumerate(range(k_low, k_high + 1)):
-#         k_rank = merged_df[f"k{k}_distance"].rank()
-#         corr, pval = spearmanr(k_rank, merged_df["tree_distance"])
-#         results_matrix[i, :] = [k, corr, pval]
-#     min_idx = int(np.nanargmin(results_matrix[:, 1]))
-#     best_k = int(results_matrix[min_idx, 0])
-#     best_corr = float(results_matrix[min_idx, 1])
-#     best_pval = float(results_matrix[min_idx, 2])
-#     return results_matrix, (best_k, best_corr, best_pval)
-
-
 ################################################################################
 # Full Grid search: unfixed k-mers; with and without weights
-def run_full_grid_corr(merged_df, k_low=5, k_high=32, w_low=0, w_high=1, w_step=0.10):
+def run_full_grid_corr(merged_df, k_low=5, k_high=32, w_low=0, w_high=1, w_step=0.05):
     """2-k full grid search over (k1, k2, w) for weighted-rank Spearman."""
-    ws = np.round(np.arange(w_low, w_high + (w_step / 2.0), w_step), 3)
+    ws = np.round(np.arange(w_low, w_high + w_step, w_step), 3)
     num_ws = len(ws)
     ks = list(range(k_low, k_high + 1))
     num_ks = len(ks)
