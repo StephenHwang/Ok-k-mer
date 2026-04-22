@@ -217,7 +217,7 @@ def main():
     p.add_argument("--tree-path", required=True, help="Path to Newick tree (.nwk)")
     p.add_argument("--k-low", type=int, default=6, help="Minimum k for grid search (default 6)")
     p.add_argument("--k-high", type=int, default=40, help="Maximum k for grid search (default 40)")
-    p.add_argument("--w-step", type=float, default=0.1, help="Weight grid step (default 0.1)")
+    p.add_argument("--w-step", type=float, default=0.05, help="Weight grid step (default 0.1)")
     p.add_argument(
         "--save-npy",
         metavar="PATH",
