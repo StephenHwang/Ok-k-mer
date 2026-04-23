@@ -1,7 +1,6 @@
 # imports
-
 import os
-# from random import randint
+from random import randint
 import multiprocessing as mp
 from random import sample
 from random import sample, seed as set_seed, randint
@@ -18,11 +17,10 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mplpatches
 import matplotlib.colors as mcolors
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-
+################################################################################
 
 
 # import plotnine
-
 from plotnine import \
     ggplot, aes, theme, themes, element_blank, element_line, element_text, mapping, \
     geom_point, geom_jitter, geom_line, geom_bar, geom_boxplot, geom_violin, geom_histogram, \
@@ -175,6 +173,7 @@ def parse_dashing_dfs(dir_path):
         print(f"{file}: {df.shape}")
     return dashing_dfs
 
+
 def build_merged_df(tree_dict, dashing_dfs):
     """
     Build merged dataframe for all genome pairs among `genomes`,
@@ -257,6 +256,38 @@ def process_data(tree_path, dashing_dir_path):
 ################################################################################
 # Grid sreach
 
+
+def make_custom_k_cmap_norm(k_one, k_two, k_three):
+    """
+    Construct a piecewise colormap and normalization for k-mer heatmaps.
+    Returns: (colormap, norm)
+    """
+    k_one_l, k_one_h = k_one
+    k_two_l, k_two_h = k_two
+    k_three_l, k_three_h = k_three
+
+    # Segment boundaries
+    two_start = max(k_one_h, k_two_l)
+    three_start = max(k_two_h, k_three_l)
+    vmin, vmax = k_one_l, k_three_h
+    scale = vmax - vmin
+
+    custom_k_cmap = mcolors.LinearSegmentedColormap.from_list(
+        "custom_k_cmap",
+        [
+            ((k_one_l - vmin) / scale, plt.cm.viridis(0.00)),  # normalized start of k-one, dark viridis
+            ((k_one_h - vmin) / scale, plt.cm.viridis(0.50)),  # normalized end of k-one, yellow
+            ((two_start - vmin) / scale, plt.cm.YlOrRd(0.25)),  # start (normalized) of k-two, lighter blue
+            ((k_two_h - vmin) / scale, plt.cm.YlOrRd(1.00)),    # end (normalized) of k-two, deep blue
+            ((three_start - vmin) / scale, plt.cm.RdBu(0.35)),  # start k-three, lighter green
+            ((k_three_h - vmin) / scale, plt.cm.RdBu(0.95)),    # end k-three, deep green
+        ],
+    )
+    custom_k_norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+    return custom_k_cmap, custom_k_norm
+
+
+
 ## one k-mer
 # Find single best k-mer length
 
@@ -270,10 +301,8 @@ def initial_corr(merged_df, iteration=0, k_low=5, k_high=32):
     min_idx = np.nanargmin(results_matrix[:,-2])
     return results_matrix, (int(results_matrix[min_idx][0]), *results_matrix[min_idx][1:3])
 
-
 # Plot single best k-mer length
-
-def plot_single_corr_colorbar(name, df, k_low=6, k_high=40):
+def plot_1k_colorbar_corr(name, df, k_low=6, k_high=40, cmap_shared="YlOrRd"):
     """Plot a single heatmap row with one colorbar for k-mer correlations."""
     arr = np.asarray(df)
     k_vals = arr[:, 0].astype(int)
@@ -288,7 +317,7 @@ def plot_single_corr_colorbar(name, df, k_low=6, k_high=40):
         heatmap,
         aspect="auto",
         origin="lower",
-        cmap="YlOrRd",
+        cmap=cmap_shared,
         vmin=0,
         # vmin=np.nanmin(heatmap),
         # vmax=0.5252762634393853
@@ -315,7 +344,6 @@ def plot_single_corr_colorbar(name, df, k_low=6, k_high=40):
             facecolor="none",
         )
         ax.add_patch(rect)
-
 
     fig.colorbar(im, ax=ax, label="Spearman corr")
     plt.show()
@@ -349,8 +377,7 @@ def run_full_grid_corr(merged_df, k_low=5, k_high=32, w_low=0, w_high=1, w_step=
     print(min_idx)
     return results_matrix, min_val, k1_min, k2_min, w_min, min_val
 
-
-def plot_2d_heatmap_from_results_matrix(name, results_matrix, k_low, k_high):
+def plot_2k_grid_corr(name, results_matrix, k_low, k_high, cmap_shared="YlOrRd"):
     """
     Plot a 2D heatmap using only the first two dimensions (k1, k2) of results_matrix.
     Averages (or finds the min/max) over the remaining dimension (e.g., ws).
@@ -365,7 +392,7 @@ def plot_2d_heatmap_from_results_matrix(name, results_matrix, k_low, k_high):
                    vmin=0,
                    origin="lower",
                    aspect="equal",
-                   cmap="YlOrRd")
+                   cmap=cmap_shared)
 
     # Label axes as k1 (y), k2 (x):
     ax.set_xlabel("k2")
@@ -391,7 +418,7 @@ def plot_2d_heatmap_from_results_matrix(name, results_matrix, k_low, k_high):
     plt.tight_layout()
     plt.show()
 
-def plot_2d_heatmap_weights_from_results_matrix(name, results_matrix, k_low, k_high, w_low=0, w_high=1, w_step=0.05):
+def plot_2k_grid_weights(name, results_matrix, k_low, k_high, w_low=0, w_high=1, w_step=0.05):
     """
     Plot a 2D heatmap using only the first two dimensions (k1, k2) of results_matrix.
     Averages (or finds the min/max) over the remaining dimension (e.g., ws).
@@ -430,7 +457,7 @@ def plot_2d_heatmap_weights_from_results_matrix(name, results_matrix, k_low, k_h
 
 ################################################################################
 
-def plot_3k_grid_corr_k(name, grid_df, k, s, k_low, k_high):
+def plot_3k_grid_corr(name, grid_df, k, s, k_low, k_high, cmap_shared="YlOrRd"):
     """
     Plot one heatmap per k1 in [k−s, …, k+s] (each 35×35, k2 × k3);
     collapse weight dims by min Spearman (matches grid objective), then negate
@@ -479,9 +506,13 @@ def plot_3k_grid_corr_k(name, grid_df, k, s, k_low, k_high):
     for i, ax in enumerate(axes):
         data = planes[i]
 
-        im = ax.imshow(data, aspect="equal", origin="lower", vmin=vmin, vmax=vmax, cmap="YlOrRd")  # color: min to max
-        # im = ax.imshow(data, vmin=0, origin="lower", aspect="equal", cmap="YlOrRd")                # color: 0 to max
-
+        im = ax.imshow(data,
+                       aspect="equal",
+                       origin="lower",
+                       vmin=0,
+                    #    vmin=vmin,
+                    #    vmax=vmax,
+                       cmap=cmap_shared)
 
         ax.set_xlabel("k3")
         ax.set_ylabel("k2")
@@ -517,53 +548,4 @@ def plot_3k_grid_corr_k(name, grid_df, k, s, k_low, k_high):
     # You can use the ax argument as a list, but use the 'fraction' and 'pad' kwargs to move it left
     cbar = fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.85, location="right", label="Spearman corr", pad=0.02)
     plt.show()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
