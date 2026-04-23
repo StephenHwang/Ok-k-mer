@@ -549,3 +549,200 @@ def plot_3k_grid_corr(name, grid_df, k, s, k_low, k_high, cmap_shared="YlOrRd"):
     cbar = fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.85, location="right", label="Spearman corr", pad=0.02)
     plt.show()
 
+
+################################################################################
+
+
+def parse_union_cardinality_dashing_dfs(dir_path):
+    """
+    Parses all distance_* files in the given directory into a dictionary of pandas DataFrames.
+    Each DataFrame skips the first line, assumes tab-separation and adjusts indices and columns as expected.
+
+    Args:
+        dir_path (str): Path to the directory containing distance_* files.
+
+    Returns:
+        dict: Dictionary mapping filename to corresponding DataFrame.
+    """
+
+    # Get list of files in directory that start with 'distance_'
+    files = [f for f in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, f)) and f.startswith('union_')]
+
+    # Create a dictionary to store dataframes
+    dashing_dfs = {}
+
+    # Read each file into a dataframe, skipping first line
+    for file in files:
+        file_path = os.path.join(dir_path, file)
+        try:
+            # Skip first line and read tab-separated data
+            df = pd.read_csv(file_path, sep='\t', header=None, skiprows=3)
+            df.index = df.iloc[:, 0].str.replace('genomes_ncbi/', '')
+            df = df.iloc[:, 1:]
+            df.columns = df.index
+            dashing_dfs[file] = df
+            # print(f"Successfully read {file}")
+        except Exception as e:
+            print(f"Error reading {file}: {str(e)}")
+
+    # Print summary of loaded dataframes
+    print(f"\nLoaded {len(dashing_dfs)} files")
+    for file, df in dashing_dfs.items():
+        print(f"{file}: {df.shape}")
+    return dashing_dfs
+
+
+def build_merged_card_df(tree_dict, dashing_card_dfs):
+    """
+    Build merged dataframe for all genome pairs among `genomes`,
+    including tree distances and distances for each k from `dashing_card_dfs`.
+
+    Parameters:
+    -----------
+    tree_dict : dict
+        Nested dictionary of tree-based distances; tree_dict[g1][g2] gives distance.
+    dashing_card_dfs : dict
+        Mapping from dashing file name to pairwise distance DataFrame.
+
+    Returns:
+    --------
+    merged_card_df : pd.DataFrame
+        DataFrame indexed by sorted genome pairs, with metadata and k-mer distances.
+    """
+
+    genomes = sorted(tree_dict.keys())
+
+    # Create all pairs of genomes (upper triangle only, sorted lexicographically)
+    pairs = []
+    for i in range(len(genomes)):
+        for j in range(i+1, len(genomes)):
+            pair = '_'.join(sorted([genomes[i], genomes[j]]))
+            pairs.append(pair)
+
+    # Initialize dataframe with pairs as index
+    merged_card_df = pd.DataFrame(index=pairs)
+
+    # Add metadata columns to merged_card_df
+    genome_pairs = []
+    genomes_1s = []
+    genomes_2s = []
+    tree_distances = []
+    for index in merged_card_df.index:
+        # Split the genome pair
+        genome1 = "_".join(index.split("_", 2)[:2])
+        genome2 = "_".join(index.split("_", 2)[2:])
+
+        # Get distance from tree_dict
+        genome_pairs.append(index)
+        genomes_1s.append(genome1)
+        genomes_2s.append(genome2)
+        tree_distances.append(tree_dict[genome1][genome2])
+
+    merged_card_df['genome_pair'] = genome_pairs
+    merged_card_df['genome_1'] = genomes_1s
+    merged_card_df['genome_2'] = genomes_2s
+    merged_card_df['tree_distance'] = tree_distances
+
+    print(f"Final dataframe shape: {merged_card_df.shape}")
+
+    # For each k, add a column to merged_card_df with the pairwise distances
+    for fname, df in dashing_card_dfs.items():
+        k_val = int(str(fname).replace('union_k', '').replace('.txt', ''))
+        # Build a dictionary mapping sorted genome pair -> distance
+        pair_to_dist = {}
+        for i in range(len(df)):
+            g1 = df.iloc[i].name
+            for g2, d in dict(df.iloc[i]).items():
+                if g1 == g2: continue
+                pair = '_'.join(sorted([g1, g2]))
+                pair_to_dist[pair] = d
+
+        # Map the distances to the merged_card_df for this k
+        colname = f'k{k_val}_cardinality'
+        merged_card_df[colname] = merged_card_df.index.map(pair_to_dist.get)
+
+        print(f"Added column '{colname}' to merged_card_df.")
+        if k_val % 2 == 0: # k-mer is even
+            num_pal = 4**(k_val/2)
+            num_distinct_kmers = (4**k_val - num_pal) / 2 + num_pal
+        else:
+            num_distinct_kmers = 4**k_val / 2
+
+        merged_card_df[colname] = merged_card_df[colname] / num_distinct_kmers
+
+    return merged_card_df
+
+def process_card_data(tree_path, dashing_dir_path):
+    tree_dict = make_tree_dict(tree_path)
+    dashing_card_dfs = parse_union_cardinality_dashing_dfs(dashing_dir_path)
+    merged_card_df = build_merged_card_df(tree_dict, dashing_card_dfs)
+    return tree_dict, dashing_card_dfs, merged_card_df
+
+
+
+def plot_kmer_dashing_card(merged_card_df, name, k_min=5, k_max=64, log=False):
+    """
+    Plot k-mer cardinality boxplots or their -log10 transforms for columns k{k}_cardinality in merged_card_df.
+
+    Parameters
+    ----------
+    merged_card_df : pandas.DataFrame
+        DataFrame containing columns like 'k5_cardinality', ..., 'k64_cardinality'.
+    name : str
+        Title prefix for plot.
+    k_min : int, optional
+        Minimum k to start from (default is 5).
+    k_max : int, optional
+        Maximum k to end at (default is 64).
+    log : bool, optional
+        If True, plot -1 * log10(cardinality) instead of cardinality. Default is False.
+    """
+
+    data = []
+    labels = []
+    medians = []
+    for k in range(k_min, k_max + 1):
+        col = f"k{k}_cardinality"
+        if col in merged_card_df.columns:
+            col_values = merged_card_df[col].dropna()
+            if log:
+                values = -1 * np.log10(col_values)
+            else:
+                values = col_values
+            data.append(values)
+            labels.append(f"k{k}")
+            if len(values) > 0:
+                medians.append(np.median(values))
+            else:
+                medians.append(np.nan)
+
+    plt.figure(figsize=(max(12, len(labels) * 0.4), 6))
+    box = plt.boxplot(data, labels=labels, showfliers=False)
+    plt.xticks(rotation=90)
+    if log:
+        plt.ylabel(r"-log$_{10}$(k-mer cardinality / number of k-mers)")
+        plt.title(f"{name}: -log10 k-mer cardinality (k = {k_min}..{k_max})")
+    else:
+        plt.ylabel("k-mer cardinality / number of k-mers")
+        plt.title(f"{name}: k-mer cardinality (k = {k_min}..{k_max})")
+    plt.tight_layout()
+
+    # Label each boxplot with the median
+    for i, median in enumerate(medians, start=1):
+        if not np.isnan(median):
+            if log:
+                plt.text(i, median, f"{median:.3f}", ha='center', va='bottom', color='midnightblue',
+                        fontsize=8, fontweight='bold', rotation=90)
+            else:
+                plt.text(i, median, f"{median:.2e}", ha='center', va='bottom', color='midnightblue',
+                        fontsize=8, fontweight='bold', rotation=90)
+
+    plt.show()
+
+
+
+
+
+
+
+
