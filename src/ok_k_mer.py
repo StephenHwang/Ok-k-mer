@@ -256,38 +256,6 @@ def process_data(tree_path, dashing_dir_path):
 ################################################################################
 # Grid sreach
 
-
-def make_custom_k_cmap_norm(k_one, k_two, k_three):
-    """
-    Construct a piecewise colormap and normalization for k-mer heatmaps.
-    Returns: (colormap, norm)
-    """
-    k_one_l, k_one_h = k_one
-    k_two_l, k_two_h = k_two
-    k_three_l, k_three_h = k_three
-
-    # Segment boundaries
-    two_start = max(k_one_h, k_two_l)
-    three_start = max(k_two_h, k_three_l)
-    vmin, vmax = k_one_l, k_three_h
-    scale = vmax - vmin
-
-    custom_k_cmap = mcolors.LinearSegmentedColormap.from_list(
-        "custom_k_cmap",
-        [
-            ((k_one_l - vmin) / scale, plt.cm.viridis(0.00)),  # normalized start of k-one, dark viridis
-            ((k_one_h - vmin) / scale, plt.cm.viridis(0.50)),  # normalized end of k-one, yellow
-            ((two_start - vmin) / scale, plt.cm.YlOrRd(0.25)),  # start (normalized) of k-two, lighter blue
-            ((k_two_h - vmin) / scale, plt.cm.YlOrRd(1.00)),    # end (normalized) of k-two, deep blue
-            ((three_start - vmin) / scale, plt.cm.RdBu(0.35)),  # start k-three, lighter green
-            ((k_three_h - vmin) / scale, plt.cm.RdBu(0.95)),    # end k-three, deep green
-        ],
-    )
-    custom_k_norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
-    return custom_k_cmap, custom_k_norm
-
-
-
 ## one k-mer
 # Find single best k-mer length
 
@@ -302,7 +270,7 @@ def initial_corr(merged_df, iteration=0, k_low=5, k_high=32):
     return results_matrix, (int(results_matrix[min_idx][0]), *results_matrix[min_idx][1:3])
 
 # Plot single best k-mer length
-def plot_1k_colorbar_corr(name, df, k_low=6, k_high=40, cmap_shared="YlOrRd"):
+def plot_1k_colorbar_corr(name, df, k_low=6, k_high=40, cmap_vmax=None):
     """Plot a single heatmap row with one colorbar for k-mer correlations."""
     arr = np.asarray(df)
     k_vals = arr[:, 0].astype(int)
@@ -313,15 +281,25 @@ def plot_1k_colorbar_corr(name, df, k_low=6, k_high=40, cmap_shared="YlOrRd"):
     heatmap = corr_vals[np.newaxis, :]  # shape (1, n_k)
     fig, ax = plt.subplots(1, 1, figsize=(5,5), constrained_layout=True) # square heatmap plot
 
-    im = ax.imshow(
-        heatmap,
-        aspect="auto",
-        origin="lower",
-        cmap=cmap_shared,
-        vmin=0,
-        # vmin=np.nanmin(heatmap),
-        # vmax=0.5252762634393853
-    )
+    if cmap_vmax:
+        cmap_shared, vmax = cmap_vmax
+        im = ax.imshow(
+            heatmap,
+            aspect="auto",
+            origin="lower",
+            cmap=cmap_shared,
+            vmin=0,
+            vmax=vmax
+        )
+    else:
+        im = ax.imshow(
+            heatmap,
+            aspect="auto",
+            origin="lower",
+            cmap="YlOrRd",
+            vmin=0
+        )
+
 
     xtick_pos = np.arange(0, len(k_vals), 2)
     ax.set_xticks(xtick_pos)
@@ -377,7 +355,7 @@ def run_full_grid_corr(merged_df, k_low=5, k_high=32, w_low=0, w_high=1, w_step=
     print(min_idx)
     return results_matrix, min_val, k1_min, k2_min, w_min, min_val
 
-def plot_2k_grid_corr(name, results_matrix, k_low, k_high, cmap_shared="YlOrRd"):
+def plot_2k_grid_corr(name, results_matrix, k_low, k_high, cmap_vmax=None):
     """
     Plot a 2D heatmap using only the first two dimensions (k1, k2) of results_matrix.
     Averages (or finds the min/max) over the remaining dimension (e.g., ws).
@@ -388,11 +366,23 @@ def plot_2k_grid_corr(name, results_matrix, k_low, k_high, cmap_shared="YlOrRd")
     n_ks = len(ks)
     fig, ax = plt.subplots(figsize=(8, 6))
 
-    im = ax.imshow(aggregate_matrix,
-                   vmin=0,
-                   origin="lower",
-                   aspect="equal",
-                   cmap=cmap_shared)
+    if cmap_vmax:
+        cmap_shared, vmax = cmap_vmax
+        im = ax.imshow(
+            aggregate_matrix,
+            origin="lower",
+            aspect="equal",
+            vmin=0,
+            cmap=cmap_shared,
+            vmax=vmax
+        )
+    else:
+        im = ax.imshow(
+            aggregate_matrix,
+            origin="lower",
+            aspect="equal",
+            vmin=0,
+            cmap="YlOrRd")
 
     # Label axes as k1 (y), k2 (x):
     ax.set_xlabel("k2")
@@ -457,7 +447,7 @@ def plot_2k_grid_weights(name, results_matrix, k_low, k_high, w_low=0, w_high=1,
 
 ################################################################################
 
-def plot_3k_grid_corr(name, grid_df, k, s, k_low, k_high, cmap_shared="YlOrRd"):
+def plot_3k_grid_corr(name, grid_df, k, s, k_low, k_high, cmap_vmax=None):
     """
     Plot one heatmap per k1 in [k−s, …, k+s] (each 35×35, k2 × k3);
     collapse weight dims by min Spearman (matches grid objective), then negate
@@ -506,13 +496,22 @@ def plot_3k_grid_corr(name, grid_df, k, s, k_low, k_high, cmap_shared="YlOrRd"):
     for i, ax in enumerate(axes):
         data = planes[i]
 
-        im = ax.imshow(data,
-                       aspect="equal",
-                       origin="lower",
-                       vmin=0,
-                    #    vmin=vmin,
-                    #    vmax=vmax,
-                       cmap=cmap_shared)
+        if cmap_vmax:
+            cmap_shared, vmax = cmap_vmax
+            im = ax.imshow(
+                data,
+                aspect="equal",
+                origin="lower",
+                vmin=0,
+                cmap=cmap_shared,
+                vmax=vmax
+            )
+        else:
+            im = ax.imshow(data,
+                           aspect="equal",
+                           origin="lower",
+                           vmin=0,
+                           cmap="YlOrRd")
 
         ax.set_xlabel("k3")
         ax.set_ylabel("k2")
@@ -741,8 +740,107 @@ def plot_kmer_dashing_card(merged_card_df, name, k_min=5, k_max=64, log=False):
 
 
 
+################################################################################
+# colorscheme stuff
+
+def min_max_3k(grid_df, s):
+    """
+    Given a grid_df, output the min and max value of each subplot (panel)
+    in the planes sliced as in the original 3k grid plotting function.
+    Also prints and returns the global min and max across all panels.
+    """
+    planes = grid_df.max(axis=(3, 4))  # (n_k1, 35, 35)
+    n_k1_full = planes.shape[0]
+    half = (n_k1_full - 1) // 2
+    if s > half:
+        raise ValueError(f"s={s} exceeds k1 half-width {half} in grid")
+    planes = planes[half - s : half + s + 1]
+    n_panels = planes.shape[0]
+    min_max_list = []
+    all_finite_vals = []
+    for i in range(n_panels):
+        data = planes[i]
+        finite_vals = data[np.isfinite(data)]
+        if finite_vals.size > 0:
+            min_val = float(np.min(finite_vals))
+            max_val = float(np.max(finite_vals))
+            all_finite_vals.append(finite_vals)
+        else:
+            min_val = float('nan')
+            max_val = float('nan')
+        min_max_list.append((min_val, max_val))
+        # print(f"Panel {i}: min={min_val}, max={max_val}")
+
+    # Calculate global min/max across all panels
+    if all_finite_vals:
+        all_data = np.concatenate(all_finite_vals)
+        global_min = float(np.min(all_data))
+        global_max = float(np.max(all_data))
+        # print(f"Global across panels: min={global_min}, max={global_max}")
+    else:
+        global_min = float('nan')
+        global_max = float('nan')
+        # print("Global across panels: min=nan, max=nan")
+    return global_min, global_max
 
 
+def make_custom_k_cmap_norm(k_one, k_two, k_three):
+    """
+    Construct a piecewise colormap and normalization for k-mer heatmaps.
+    Returns: (colormap, norm)
+    """
+    k_one_l, k_one_h = k_one
+    k_two_l, k_two_h = k_two
+    k_three_l, k_three_h = k_three
+
+    # Segment boundaries
+    vmin = min(k_one_l, k_two_l, k_three_l)
+    vmax = max(k_one_h, k_two_h, k_three_h)
+    scale = vmax - vmin
+
+    color_1_start = vmin
+    color_1_end_color_2_start =  min(k_one_h, k_two_h)
+    color_2_end_color_3_start = max(k_one_h, k_two_h)
+    # color_2_end_color_3_start = k_two_h        # if error, max(k_one_h, k_two_h)
+    color_3_end = vmax
+
+    # Build ordered list of (x, color) tuples
+    color_points = [
+        ((color_1_start - vmin) / scale, plt.cm.viridis(0.00)),     # normalized start of k-one, dark viridis
+        ((color_1_end_color_2_start - vmin) / scale, plt.cm.viridis(0.50)),     # normalized end of k-one, yellow
+        ((color_1_end_color_2_start - vmin) / scale, plt.cm.YlOrRd(0.25)),    # start (normalized) of k-two, lighter blue
+        ((color_2_end_color_3_start - vmin) / scale, plt.cm.YlOrRd(1.00)),      # end (normalized) of k-two, deep blue
+        ((color_2_end_color_3_start - vmin) / scale, plt.cm.RdBu(0.35)),    # start k-three, lighter green
+        ((color_3_end - vmin) / scale, plt.cm.RdBu(0.95)),      # end k-three, deep green
+    ]
+
+    # Ensure points are sorted by x (the first value in each tuple)
+    # color_points_sorted = sorted(color_points, key=lambda item: item[0])
+    color_points_sorted = color_points
+    print(color_points_sorted)
+
+    custom_k_cmap = mcolors.LinearSegmentedColormap.from_list(
+        "custom_k_cmap",
+        color_points,
+        # color_points_sorted,
+    )
+    custom_k_norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+    return custom_k_cmap, custom_k_norm
 
 
+def build_cmap_dict(datasets_1k, datasets_2k, datasets_3k):
+    cmap_dict = dict()
+    for (name, k1_df), (_, k2_df), (_, k3_df, *_) in zip(datasets_1k, datasets_2k, datasets_3k):
+        k1_corr =  k1_df[:, 1]
+        k1_min, k1_max = np.nanmin(k1_corr[np.isfinite(k1_corr)]), np.nanmax(k1_corr[np.isfinite(k1_corr)])    # good
+        k2_agg = np.max(k2_df, axis=2)  # shape [k1, k2]
+        k2_min, k2_max =  np.nanmin(k2_agg[np.isfinite(k2_agg)]), np.nanmax(k2_agg[np.isfinite(k2_agg)])
+        k3_min, k3_max = min_max_3k(k3_df, s=2)
+        print(f"{name}:")
+        print(f"  k1_df min: {k1_min}, max: {k1_max}")
+        print(f"  k2_df min: {k2_min}, max: {k2_max}")
+        print(f"  k3_df min: {k3_min}, max: {k3_max}")
 
+        custom_k_cmap, custom_k_norm = make_custom_k_cmap_norm((k1_min, k1_max), (k2_min, k2_max), (k3_min, k3_max))
+        cmap_dict[name] = custom_k_cmap, max(k1_max, k2_max, k3_max)
+    return cmap_dict
