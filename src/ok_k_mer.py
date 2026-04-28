@@ -445,6 +445,116 @@ def plot_2k_grid_weights(name, results_matrix, k_low, k_high, w_low=0, w_high=1,
     plt.show()
 
 
+
+def plot_2k_grid_joint_corr_weight(name, results_matrix, k_low, k_high, cmap_vmax=None, w_low=0, w_high=1, w_step=0.05):
+    """
+    Plot a 2D heatmap using only the first two dimensions (k1, k2) of results_matrix.
+    Averages (or finds the min/max) over the remaining dimension (e.g., ws).
+    Spearman correlation strength is shown; the axes cover all ks in the range.
+    In the lower right triangle, overlay weights (following cmap_weight colors) as circles.
+    """
+    # Get argmax weight indexes and their weight values (for overlay)
+    indexes = np.nanargmax(results_matrix, axis=2)  # shape [k1, k2]
+    ws = np.round(np.arange(w_low, w_high + w_step, w_step), 3)
+    aggregate_matrix = np.max(results_matrix, axis=2)  # For the heatmap (correlation values)
+    weight_matrix = ws[indexes]  # For overlay (weights at the max corr per cell)
+    ks = list(range(k_low, k_high + 1))
+    n_ks = len(ks)
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    # Main correlation heatmap
+    if cmap_vmax:
+        cmap_shared, vmax = cmap_vmax
+        im = ax.imshow(
+            aggregate_matrix,
+            origin="lower",
+            aspect="equal",
+            vmin=0,
+            cmap=cmap_shared,
+            vmax=vmax
+        )
+    else:
+        im = ax.imshow(
+            aggregate_matrix,
+            origin="lower",
+            aspect="equal",
+            vmin=0,
+            cmap="YlOrRd"
+        )
+
+    # Prepare weight colormap for overlayed circles (discrete, for weights)
+    cmap_weight = plt.get_cmap("Greys", len(ws))
+    boundaries = np.arange(w_low, w_high + w_step, w_step)
+    norm_weight = mcolors.BoundaryNorm(boundaries, cmap_weight.N, clip=True)
+    # Overlay circles for weights in the lower right triangle (k2 > k1)
+    for k1_idx in range(n_ks):
+        for k2_idx in range(n_ks):
+            if k2_idx > k1_idx:  # Lower right triangle (above main diagonal)
+                weight = weight_matrix[k1_idx, k2_idx]
+                # Find closest color in cmap_weight
+                # Use norm_weight to get color
+                color = cmap_weight(norm_weight(weight))
+                # Add a circle inscribed in the square cell
+                center = (k2_idx, k1_idx)
+                radius = 0.40  # fill cell but leave border (radius < 0.5)
+                circle = plt.Circle(center, radius, color=color, alpha=1.0, ec='k', lw=0.5)
+                ax.add_patch(circle)
+
+    # Label axes as k1 (y), k2 (x):
+    ax.set_xlabel("k2")
+    ax.set_ylabel("k1")
+    ax.set_title(f"{name}: Spearman correlation for two k-mers, k={k_low}..{k_high}")
+
+    xticks = yticks = list(range(n_ks))
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(ks, fontsize=8, rotation=90)
+    ax.set_yticks(yticks)
+    ax.set_yticklabels(ks, fontsize=8)
+
+    # Optional: mark the globally max (best) cell
+    max_val = np.nanmax(aggregate_matrix[np.isfinite(aggregate_matrix)])
+    min_indices = np.where(aggregate_matrix == max_val)
+    print(min_indices, max_val)
+    if len(min_indices[0]) > 0:
+        y, x = min_indices[0][0], min_indices[1][0]
+        ax.add_patch(plt.Rectangle((x-0.5, y-0.5), 1, 1, fill=False, edgecolor='black', lw=2.5))
+
+    # Main heatmap colorbar (Spearman correlation)
+    cbar = fig.colorbar(im, ax=ax, shrink=0.8, label="Spearman correlation", location="right")
+
+    # Add a legend for the weight colormap, positioned to the right of the Spearman cbar
+    from matplotlib.colorbar import ColorbarBase
+
+    # Get the position and size of the main colorbar
+    cbar_ax = cbar.ax
+    fig = cbar_ax.figure
+    cbar_pos = cbar_ax.get_position()
+
+    # Calculate bounding box for the weight colorbar to the right of the correlation colorbar
+    width = cbar_pos.width / 4  # reduce width by 2/3
+    pad = 0.06  # space between colorbars (fraction of figure)
+    new_x0 = cbar_pos.x1 + pad
+    new_pos = [new_x0, cbar_pos.y0, width, cbar_pos.height]
+    cbar_ax_weights = fig.add_axes(new_pos)
+
+    cb_weights = ColorbarBase(
+        cbar_ax_weights,
+        cmap=cmap_weight,
+        norm=norm_weight,
+        boundaries=boundaries,
+        ticks=ws,
+        spacing='proportional',
+        orientation="vertical",
+        label="Weight"
+    )
+    # Make tick labels clean
+    cb_weights.ax.set_yticklabels([f"{w:.2f}" for w in ws], fontsize=7)
+    cb_weights.set_label("k1 weight", fontsize=9, labelpad=10)
+
+    # Adjust layout
+    plt.tight_layout()
+    plt.show()
+
 ################################################################################
 
 def plot_3k_grid_corr(name, grid_df, k, s, k_low, k_high, cmap_vmax=None):
