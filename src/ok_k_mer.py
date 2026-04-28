@@ -266,7 +266,7 @@ def initial_corr(merged_df, iteration=0, k_low=5, k_high=32):
         k_rank = merged_df[f'k{k}_distance'].rank()
         corr, pval = spearmanr(k_rank, merged_df['tree_distance'])
         results_matrix[i, :] = [k, -1*corr, pval]
-    min_idx = np.nanargmin(results_matrix[:,-2])
+    min_idx = np.nanargmax(results_matrix[:,-2])
     return results_matrix, (int(results_matrix[min_idx][0]), *results_matrix[min_idx][1:3])
 
 # Plot single best k-mer length
@@ -794,12 +794,13 @@ def make_custom_k_cmap_norm(k_one, k_two, k_three):
     k_three_l, k_three_h = k_three
 
     # Segment boundaries
-    vmin = min(k_one_l, k_two_l, k_three_l)
+    vmin = 0 #min(k_one_l, k_two_l, k_three_l)
     vmax = max(k_one_h, k_two_h, k_three_h)
     scale = vmax - vmin
 
     color_1_start = vmin
-    color_1_end_color_2_start =  min(k_one_h, k_two_h)
+    color_1_end_color_2_start =  k_one_h
+    # color_1_end_color_2_start =  min(k_one_h, k_two_h)
     color_2_end_color_3_start = max(k_one_h, k_two_h)
     # color_2_end_color_3_start = k_two_h        # if error, max(k_one_h, k_two_h)
     color_3_end = vmax
@@ -814,18 +815,11 @@ def make_custom_k_cmap_norm(k_one, k_two, k_three):
         ((color_3_end - vmin) / scale, plt.cm.RdBu(0.95)),      # end k-three, deep green
     ]
 
-    # Ensure points are sorted by x (the first value in each tuple)
-    # color_points_sorted = sorted(color_points, key=lambda item: item[0])
-    color_points_sorted = color_points
-    print(color_points_sorted)
-
-    custom_k_cmap = mcolors.LinearSegmentedColormap.from_list(
-        "custom_k_cmap",
-        color_points,
-        # color_points_sorted,
-    )
+    custom_k_cmap = mcolors.LinearSegmentedColormap.from_list("custom_k_cmap", color_points)
     custom_k_norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
-    return custom_k_cmap, custom_k_norm
+    print(color_points)
+    return custom_k_cmap, custom_k_norm, vmax
+
 
 
 def build_cmap_dict(datasets_1k, datasets_2k, datasets_3k):
@@ -836,11 +830,10 @@ def build_cmap_dict(datasets_1k, datasets_2k, datasets_3k):
         k2_agg = np.max(k2_df, axis=2)  # shape [k1, k2]
         k2_min, k2_max =  np.nanmin(k2_agg[np.isfinite(k2_agg)]), np.nanmax(k2_agg[np.isfinite(k2_agg)])
         k3_min, k3_max = min_max_3k(k3_df, s=2)
-        print(f"{name}:")
-        print(f"  k1_df min: {k1_min}, max: {k1_max}")
-        print(f"  k2_df min: {k2_min}, max: {k2_max}")
-        print(f"  k3_df min: {k3_min}, max: {k3_max}")
-
-        custom_k_cmap, custom_k_norm = make_custom_k_cmap_norm((k1_min, k1_max), (k2_min, k2_max), (k3_min, k3_max))
-        cmap_dict[name] = custom_k_cmap, max(k1_max, k2_max, k3_max)
+        # print(f"{name}:")
+        # print(f"  k1_df min: {k1_min}, max: {k1_max}")
+        # print(f"  k2_df min: {k2_min}, max: {k2_max}")
+        # print(f"  k3_df min: {k3_min}, max: {k3_max}")
+        custom_k_cmap, custom_k_norm, vmax = make_custom_k_cmap_norm((k1_min, k1_max), (k2_min, k2_max), (k3_min, k3_max))
+        cmap_dict[name] = custom_k_cmap, vmax
     return cmap_dict
