@@ -807,10 +807,13 @@ def make_custom_k_cmap_norm(k_one, k_two, k_three):
 
     # Build ordered list of (x, color) tuples
     color_points = [
+        # color 1
         ((color_1_start - vmin) / scale, plt.cm.viridis(0.00)),     # normalized start of k-one, dark viridis
         ((color_1_end_color_2_start - vmin) / scale, plt.cm.viridis(0.50)),     # normalized end of k-one, yellow
+        # color 2
         ((color_1_end_color_2_start - vmin) / scale, plt.cm.YlOrRd(0.25)),    # start (normalized) of k-two, lighter blue
         ((color_2_end_color_3_start - vmin) / scale, plt.cm.YlOrRd(1.00)),      # end (normalized) of k-two, deep blue
+        # color 3
         ((color_2_end_color_3_start - vmin) / scale, plt.cm.RdBu(0.35)),    # start k-three, lighter green
         ((color_3_end - vmin) / scale, plt.cm.RdBu(0.95)),      # end k-three, deep green
     ]
@@ -830,10 +833,10 @@ def build_cmap_dict(datasets_1k, datasets_2k, datasets_3k):
         k2_agg = np.max(k2_df, axis=2)  # shape [k1, k2]
         k2_min, k2_max =  np.nanmin(k2_agg[np.isfinite(k2_agg)]), np.nanmax(k2_agg[np.isfinite(k2_agg)])
         k3_min, k3_max = min_max_3k(k3_df, s=2)
-        # print(f"{name}:")
-        # print(f"  k1_df min: {k1_min}, max: {k1_max}")
-        # print(f"  k2_df min: {k2_min}, max: {k2_max}")
-        # print(f"  k3_df min: {k3_min}, max: {k3_max}")
+        print(f"{name}:")
+        print(f"  k1_df min: {k1_min}, max: {k1_max}")
+        print(f"  k2_df min: {k2_min}, max: {k2_max}")
+        print(f"  k3_df min: {k3_min}, max: {k3_max}")
         custom_k_cmap, custom_k_norm, vmax = make_custom_k_cmap_norm((k1_min, k1_max), (k2_min, k2_max), (k3_min, k3_max))
         cmap_dict[name] = custom_k_cmap, vmax
     return cmap_dict
