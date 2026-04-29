@@ -41,10 +41,15 @@ mkdir -p "$output_path"
 ml GCC/11.3.0
 
 # Run
+  # dashing2-64 vs dashing2
+  # dashing2 cmp --union-size --set --long-kmers -k "$k" -p "$threads" --square \           # og
+  # dashing2 cmp --union-size --long-kmers -k "$k" -p "$threads" --square \                 # with --long-kmers, no --set
+  # dashing2 cmp --union-size --countdict --long-kmers -k "$k" -p "$threads" --square \     # with --long-kmers, and --countdict
+  # dashing2 cmp --union-size --long-kmers -k "$k" -p "$threads" --square \                 # no --long-kmers
 for ((k = k_min; k <= k_max; k++)); do
-  dashing2 cmp --union-size --set --long-kmers -k "$k" -p "$threads" --square \
+  dashing2 cmp --union-size --set -k "$k" -p "$threads" --square \
     -F "$input_paths" \
-    > "${output_path}/${output_prefix}_k${k}.txt"
+    > "${output_path}/${output_prefix}_sketch_k${k}.txt"
 done
 
 echo "Finished with job $SLURM_JOBID"
