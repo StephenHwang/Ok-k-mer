@@ -1068,14 +1068,20 @@ def make_custom_k_cmap_norm(k_one, k_two, k_three):
     # Build ordered list of (x, color) tuples
     color_points = [
         # color 1
-        ((color_1_start - vmin) / scale, plt.cm.viridis(0.00)),     # normalized start of k-one, dark viridis
+        ((color_1_start - vmin) / scale, plt.cm.viridis(0.20)),                 # normalized start of k-one, dark viridis
         ((color_1_end_color_2_start - vmin) / scale, plt.cm.viridis(0.50)),     # normalized end of k-one, yellow
+        # ((color_1_start - vmin) / scale, plt.cm.viridis(0.00)),                 # og
+        # ((color_1_end_color_2_start - vmin) / scale, plt.cm.viridis(0.50)),     # og
         # color 2
-        ((color_1_end_color_2_start - vmin) / scale, plt.cm.YlOrRd(0.25)),    # start (normalized) of k-two, lighter blue
+        ((color_1_end_color_2_start - vmin) / scale, plt.cm.YlOrRd(0.25)),      # start (normalized) of k-two, lighter blue
         ((color_2_end_color_3_start - vmin) / scale, plt.cm.YlOrRd(1.00)),      # end (normalized) of k-two, deep blue
+        # ((color_1_end_color_2_start - vmin) / scale, plt.cm.YlOrRd(0.25)),      # og
+        # ((color_2_end_color_3_start - vmin) / scale, plt.cm.YlOrRd(1.00)),      # og
         # color 3
-        ((color_2_end_color_3_start - vmin) / scale, plt.cm.RdBu(0.35)),    # start k-three, lighter green
-        ((color_3_end - vmin) / scale, plt.cm.RdBu(0.95)),      # end k-three, deep green
+        ((color_2_end_color_3_start - vmin) / scale, plt.cm.RdPu(0.50)),        # start k-three, lighter green
+        ((color_3_end - vmin) / scale, plt.cm.RdPu(0.95)),                      # end k-three, deep green
+        # ((color_2_end_color_3_start - vmin) / scale, plt.cm.RdBu(0.35)),        # og
+        # ((color_3_end - vmin) / scale, plt.cm.RdBu(0.95)),                      # og
     ]
 
     custom_k_cmap = mcolors.LinearSegmentedColormap.from_list("custom_k_cmap", color_points)
