@@ -15,6 +15,7 @@ from scipy.stats import binom, geom, spearmanr, pearsonr
 # import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as mplpatches
+from matplotlib.colorbar import ColorbarBase
 import matplotlib.colors as mcolors
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 ################################################################################
@@ -523,7 +524,6 @@ def plot_2k_grid_joint_corr_weight(name, results_matrix, k_low, k_high, cmap_vma
     cbar = fig.colorbar(im, ax=ax, shrink=0.8, label="Spearman correlation", location="right")
 
     # Add a legend for the weight colormap, positioned to the right of the Spearman cbar
-    from matplotlib.colorbar import ColorbarBase
 
     # Get the position and size of the main colorbar
     cbar_ax = cbar.ax
@@ -554,6 +554,156 @@ def plot_2k_grid_joint_corr_weight(name, results_matrix, k_low, k_high, cmap_vma
     # Adjust layout
     plt.tight_layout()
     plt.show()
+
+
+
+def plot_3k_grid_joint_corr_weight(name, grid_df, k, s, k_low, k_high, cmap_vmax=None, w_low=0, w_high=1, w_step=0.10):
+    """
+    Plot one heatmap per k1 in [k−s, …, k+s] (each 35×35, k2 × k3);
+    collapse weight dims by min Spearman (matches grid objective), then negate
+    so stronger associations plot as larger positive values (for YlOrRd).
+    Only show every other tick for the x and y axes.
+    Tick labels use a smaller font.
+    In each subplot, color the best (largest) cell red.
+    Across all subplots, color the overall best cell black.
+    """
+    ws = np.round(np.arange(w_low, w_high + w_step, w_step), 3)
+    finite_grid = np.where(np.isfinite(grid_df), grid_df, -np.inf)
+    valid_mask = np.any(np.isfinite(grid_df), axis=(3, 4))
+    flat_grid = finite_grid.reshape(*finite_grid.shape[:3], -1)
+    flat_best_idx = np.argmax(flat_grid, axis=3)
+    best_w1_idx = flat_best_idx // grid_df.shape[4]
+
+    planes = np.max(flat_grid, axis=3)
+    planes[~valid_mask] = np.nan
+    weight_matrix = ws[np.clip(best_w1_idx, 0, len(ws) - 1)].astype(float)
+    weight_matrix[~valid_mask] = np.nan
+
+    n_k1_full = planes.shape[0]
+    half = (n_k1_full - 1) // 2
+    if s > half:
+        raise ValueError(f"s={s} exceeds k1 half-width {half} in grid")
+    planes = planes[half - s : half + s + 1]
+    weight_matrix = weight_matrix[half - s : half + s + 1]
+    n_panels = planes.shape[0]
+    fig_w = 24 * n_panels / 7
+    fig, axes = plt.subplots(1, n_panels, figsize=(fig_w, 3.5), squeeze=False)
+    axes = np.ravel(axes)
+
+    # k1 titles aligned with sliced panels (length must equal n_panels)
+    k_subplot_labels = [k - s + i for i in range(n_panels)]
+    k_axis_labels = list(range(k_low, k_high + 1))
+
+    # Only select every other tick for the axes
+    n_labels = len(k_axis_labels)
+    xtick_positions = [i for i in range(n_labels) if i % 2 == 0]  # every other tick
+    ytick_positions = [i for i in range(n_labels) if i % 2 == 0]
+    xtick_labels = [k_axis_labels[i] for i in xtick_positions]
+    ytick_labels = [k_axis_labels[i] for i in ytick_positions]
+
+    cmap_weight = plt.get_cmap("Greys", len(ws))
+    boundaries = np.arange(w_low, w_high + w_step, w_step)
+    norm_weight = mcolors.BoundaryNorm(boundaries, cmap_weight.N, clip=True)
+
+    # Overall best cell across all planes (largest after negation)
+    global_max = np.nanmax(planes)
+    g_indices = np.where(planes == global_max)
+    if len(g_indices[0]) > 0:
+        global_best_subplot = int(g_indices[0][0])
+        global_best_y = int(g_indices[1][0])
+        global_best_x = int(g_indices[2][0])
+    else:
+        global_best_subplot = global_best_y = global_best_x = None
+
+    im = None
+    tick_label_fontsize = 8  # Make tick labels smaller
+    for i, ax in enumerate(axes):
+        data = planes[i]
+
+        if cmap_vmax:
+            cmap_shared, vmax = cmap_vmax
+            im = ax.imshow(
+                data,
+                aspect="equal",
+                origin="lower",
+                vmin=0,
+                cmap=cmap_shared,
+                vmax=vmax
+            )
+        else:
+            im = ax.imshow(data,
+                           aspect="equal",
+                           origin="lower",
+                           vmin=0,
+                           cmap="YlOrRd")
+
+        for k2_idx in range(data.shape[0]):
+            for k3_idx in range(data.shape[1]):
+                if k3_idx > k2_idx and np.isfinite(data[k2_idx, k3_idx]):
+                    weight = weight_matrix[i, k2_idx, k3_idx]
+                    color = cmap_weight(norm_weight(weight))
+                    circle = plt.Circle((k3_idx, k2_idx), 0.40, color=color, alpha=1.0, ec='k', lw=0.5)
+                    ax.add_patch(circle)
+
+        ax.set_xlabel("k3")
+        ax.set_ylabel("k2")
+        ax.set_title(f"k1={k_subplot_labels[i]}")
+
+        # Set x/y ticks and labels at every other tick, use smaller font
+        ax.set_xticks(xtick_positions)
+        ax.set_xticklabels(xtick_labels, fontsize=tick_label_fontsize)
+        ax.set_yticks(ytick_positions)
+        ax.set_yticklabels(ytick_labels, fontsize=tick_label_fontsize)
+
+        # Highlight the best (largest) cell in the plane with a red rectangle or marker,
+        # but only if there is at least one finite value.
+        if np.any(np.isfinite(data)):
+            max_val = np.nanmax(data)
+            ys, xs = np.where(data == max_val)
+            if len(ys) > 0:
+                y, x = ys[0], xs[0]
+                # If this cell is ALSO the global best, color it black. Otherwise, red.
+                if i == global_best_subplot and y == global_best_y and x == global_best_x:
+                    rect = plt.Rectangle((x - 0.5, y - 0.5), 1, 1,
+                                        linewidth=2.5, edgecolor='#000000', facecolor='none')       # #00BFFF for blue
+                    ax.add_patch(rect)
+                # else:
+                    # rect = plt.Rectangle((x - 0.5, y - 0.5), 1, 1,
+                    #                     linewidth=2.5, edgecolor='red', facecolor='none')
+                    # ax.add_patch(rect)
+
+    # fig.suptitle(f"{name}: Spearman correlation for three k-mers, k={k_low}..{k_high}", fontsize=18)
+    fig.suptitle(f"{name}: Spearman correlation for three k-mers, k={k_low}..{k_high}")
+
+    cbar = fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.85, location="right", label="Spearman correlation", pad=0.02)
+
+    cbar_ax = cbar.ax
+    fig = cbar_ax.figure
+    cbar_pos = cbar_ax.get_position()
+    width = cbar_pos.width / 4
+    pad = 0.06
+    new_x0 = cbar_pos.x1 + pad
+    new_pos = [new_x0, cbar_pos.y0, width, cbar_pos.height]
+    cbar_ax_weights = fig.add_axes(new_pos)
+
+    cb_weights = ColorbarBase(
+        cbar_ax_weights,
+        cmap=cmap_weight,
+        norm=norm_weight,
+        boundaries=boundaries,
+        ticks=ws,
+        spacing='proportional',
+        orientation="vertical",
+        label="Weight"
+    )
+    cb_weights.ax.set_yticklabels([f"{w:.2f}" for w in ws], fontsize=7)
+    cb_weights.set_label("k1 weight", fontsize=9, labelpad=10)
+
+    plt.tight_layout()
+    plt.show()
+
+
+
 
 ################################################################################
 
