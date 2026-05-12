@@ -8,7 +8,8 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=shwang45@jhu.edu
 
-set -euxo pipefail
+# set -euxo pipefail
+set -euo pipefail
 
 get_total_kmers() {
   local db_prefix="$1"
@@ -122,7 +123,7 @@ for ((k = k_min; k <= k_max; k++)); do
         pair_union="${op_dir}/union_${i}_${j}"
         kmc_tools simple "${dbs[$i]}" "${dbs[$j]}" union "$pair_union" > /dev/null
         card="$(get_total_kmers "$pair_union")"
-        # rm -f "${pair_union}.kmc_pre" "${pair_union}.kmc_suf"
+        rm -f "${pair_union}.kmc_pre" "${pair_union}.kmc_suf"
       fi
       pair_card["${i},${j}"]="$card"
       if (( i != j )); then
@@ -148,6 +149,6 @@ for ((k = k_min; k <= k_max; k++)); do
 
 done
 
-# rm -rf "$tmp_root"
+rm -rf "$tmp_root"
 
 echo "Finished with job $SLURM_JOBID"
