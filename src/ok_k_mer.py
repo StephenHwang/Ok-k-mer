@@ -1,5 +1,6 @@
 # imports
 import os
+import re
 from random import randint
 import multiprocessing as mp
 from random import sample
@@ -811,8 +812,7 @@ def plot_3k_grid_corr(name, grid_df, k, s, k_low, k_high, cmap_vmax=None):
 
 ################################################################################
 
-
-def parse_union_cardinality_dashing_dfs(dir_path):
+def parse_intersection_cardinality_dashing_dfs(dir_path):
     """
     Parses all distance_* files in the given directory into a dictionary of pandas DataFrames.
     Each DataFrame skips the first line, assumes tab-separation and adjusts indices and columns as expected.
@@ -851,7 +851,7 @@ def parse_union_cardinality_dashing_dfs(dir_path):
     return dashing_dfs
 
 
-def build_merged_card_df(tree_dict, dashing_card_dfs):
+def build_merged_dashing_intersection_card(tree_dict, dashing_card_dfs):
     """
     Build merged dataframe for all genome pairs among `genomes`,
     including tree distances and distances for each k from `dashing_card_dfs`.
@@ -931,10 +931,146 @@ def build_merged_card_df(tree_dict, dashing_card_dfs):
 
     return merged_card_df
 
-def process_card_data(tree_path, dashing_dir_path):
+def process_dashing_intersection_card(tree_path, dashing_dir_path):
+    tree_dict = make_tree_dict(tree_path)
+    dashing_card_dfs = parse_intersection_cardinality_dashing_dfs(dashing_dir_path)
+    merged_card_df = build_merged_dashing_intersection_card(tree_dict, dashing_card_dfs)
+    return tree_dict, dashing_card_dfs, merged_card_df
+
+
+
+def parse_union_cardinality_dashing_dfs(dir_path):
+    """
+    Parses all distance_* files in the given directory into a dictionary of pandas DataFrames.
+    Each DataFrame skips the first line, assumes tab-separation and adjusts indices and columns as expected.
+
+    Args:
+        dir_path (str): Path to the directory containing distance_* files.
+
+    Returns:
+        dict: Dictionary mapping filename to corresponding DataFrame.
+    """
+
+    # Get list of files in directory that start with 'distance_'
+    files = [f for f in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, f)) and 'union_matrix' in f]
+
+    # Create a dictionary to store dataframes
+    dashing_dfs = {}
+
+    # Read each file into a dataframe, skipping first line
+    for file in files:
+        file_path = os.path.join(dir_path, file)
+        try:
+            # Skip first line and read tab-separated data
+            df = pd.read_csv(file_path, sep='\t', header=None, skiprows=1)
+            df.index = df.iloc[:, 0] #.str.replace('genomes_ncbi/', '')
+            df = df.iloc[:, 1:]
+            df.columns = df.index
+            dashing_dfs[file] = df
+            # print(f"Successfully read {file}")
+        except Exception as e:
+            print(f"Error reading {file}: {str(e)}")
+
+    # Print summary of loaded dataframes
+    print(f"\nLoaded {len(dashing_dfs)} files")
+    for file, df in dashing_dfs.items():
+        print(f"{file}: {df.shape}")
+    return dashing_dfs
+
+
+def build_merged_kmc_union_card(tree_dict, dashing_card_dfs):
+    """
+    Build merged dataframe for all genome pairs among `genomes`,
+    including tree distances and distances for each k from `dashing_card_dfs`.
+
+    Parameters:
+    -----------
+    tree_dict : dict
+        Nested dictionary of tree-based distances; tree_dict[g1][g2] gives distance.
+    dashing_card_dfs : dict
+        Mapping from dashing file name to pairwise distance DataFrame.
+
+    Returns:
+    --------
+    merged_card_df : pd.DataFrame
+        DataFrame indexed by sorted genome pairs, with metadata and k-mer distances.
+    """
+
+    genomes = sorted(tree_dict.keys())
+
+    # Create all pairs of genomes (upper triangle only, sorted lexicographically)
+    pairs = []
+    for i in range(len(genomes)):
+        for j in range(i+1, len(genomes)):
+            pair = '_'.join(sorted([genomes[i], genomes[j]]))
+            pairs.append(pair)
+
+    # Initialize dataframe with pairs as index
+    merged_card_df = pd.DataFrame(index=pairs)
+
+    # Add metadata columns to merged_card_df
+    genome_pairs = []
+    genomes_1s = []
+    genomes_2s = []
+    tree_distances = []
+    for index in merged_card_df.index:
+        # Split the genome pair
+        genome1 = "_".join(index.split("_", 2)[:2])
+        genome2 = "_".join(index.split("_", 2)[2:])
+
+        # Get distance from tree_dict
+        genome_pairs.append(index)
+        genomes_1s.append(genome1)
+        genomes_2s.append(genome2)
+        tree_distances.append(tree_dict[genome1][genome2])
+
+    merged_card_df['genome_pair'] = genome_pairs
+    merged_card_df['genome_1'] = genomes_1s
+    merged_card_df['genome_2'] = genomes_2s
+    merged_card_df['tree_distance'] = tree_distances
+
+    print(f"Final dataframe shape: {merged_card_df.shape}")
+
+    # For each k, add a column to merged_card_df with the pairwise distances
+    for fname, df in dashing_card_dfs.items():
+        # k_val = int(str(fname).replace('union_k', '').replace('.txt', ''))
+        match = re.search(r'_k(\d+)\.tsv$', fname)
+        if match:
+            k_val = int(match.group(1))
+        else:
+            raise ValueError(f"Could not extract k from filename: {fname}")
+        k_val
+
+        # Build a dictionary mapping sorted genome pair -> distance
+        pair_to_dist = {}
+        for i in range(len(df)):
+            g1 = df.iloc[i].name
+            for g2, d in dict(df.iloc[i]).items():
+                if g1 == g2: continue
+                pair = '_'.join(sorted([g1, g2]))
+                pair_to_dist[pair] = d
+
+        # Map the distances to the merged_card_df for this k
+        colname = f'k{k_val}_cardinality'
+        merged_card_df[colname] = merged_card_df.index.map(pair_to_dist.get)
+
+        print(f"Added column '{colname}' to merged_card_df.")
+        if k_val % 2 == 0: # k-mer is even
+            num_pal = 4**(k_val/2)
+            num_distinct_kmers = (4**k_val - num_pal) / 2 + num_pal
+        else:
+            num_distinct_kmers = 4**k_val / 2
+
+        merged_card_df[colname] = merged_card_df[colname] / num_distinct_kmers
+
+    return merged_card_df
+
+
+
+def process_kmc_union_card(tree_path, dashing_dir_path):
     tree_dict = make_tree_dict(tree_path)
     dashing_card_dfs = parse_union_cardinality_dashing_dfs(dashing_dir_path)
-    merged_card_df = build_merged_card_df(tree_dict, dashing_card_dfs)
+    merged_card_df = build_merged_kmc_union_card(tree_dict, dashing_card_dfs)
     return tree_dict, dashing_card_dfs, merged_card_df
 
 
