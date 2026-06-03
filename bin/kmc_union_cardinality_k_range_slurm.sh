@@ -1,9 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=run_kmc3_union_cardinality
-#SBATCH --time=24:00:00
-#SBATCH --partition=shared
+#SBATCH --time=72:00:00
+#SBATCH --partition=parallel
 #SBATCH --account=blangme2
-#SBATCH --mem=64G
+#SBATCH --mem=24G
+#SBATCH --cpus-per-task=24
 #SBATCH --ntasks-per-node=1
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=shwang45@jhu.edu
@@ -64,7 +65,8 @@ if [ ! -s "$input_paths" ]; then
 fi
 
 mkdir -p "$output_path"
-tmp_root="${output_path}/kmc_tmp_${SLURM_JOBID}"
+# tmp_root="${output_path}/kmc_tmp_${SLURM_JOBID}"
+tmp_root="/tmp/kmc_tmp_${SLURM_JOBID}"
 mkdir -p "$tmp_root"
 
 mapfile -t samples < "$input_paths"
