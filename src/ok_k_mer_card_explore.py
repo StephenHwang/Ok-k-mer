@@ -193,6 +193,8 @@ def plot_logcard_dynamics(name, stats_df, opt_k=None, stat="average",
         ax_i.legend(loc="best", frameon=False, fontsize=8)
 
     axes[-1].set_xlabel("k-mer length")
+    axes[-1].set_xticks(k)
+    axes[-1].set_xticklabels(k, fontsize=7, rotation=90)
     axes[0].set_title(f"{name}: -log10 k-mer cardinality dynamics ({stat})")
     fig.tight_layout()
     return fig
@@ -362,6 +364,43 @@ def theoretical_card(k, G):
 # Regenerate a missing stats TSV (e.g. Cyano)
 
 
+def verify_pair_count(merged_card_df, expected_genomes=None):
+    """Sanity-check that a merged union-cardinality frame is internally consistent.
+
+    Guards against the cross-dataset mislabeling bug where a cached frame held
+    another clade's data. Infers the genome count from the ``genome_1`` /
+    ``genome_2`` columns, requires the row count to equal the complete
+    upper-triangle pair count ``n*(n-1)/2``, and (optionally) checks that the
+    genome count matches ``expected_genomes``.
+
+    Returns ``(n_genomes, n_pairs)``. Raises ``ValueError`` on any mismatch.
+    """
+    if not {"genome_1", "genome_2"}.issubset(merged_card_df.columns):
+        raise ValueError(
+            "merged_card_df is missing 'genome_1'/'genome_2' columns; "
+            "cannot verify pair count"
+        )
+
+    genomes = set(merged_card_df["genome_1"]) | set(merged_card_df["genome_2"])
+    n = len(genomes)
+    expected_pairs = n * (n - 1) // 2
+    n_rows = len(merged_card_df)
+
+    if n_rows != expected_pairs:
+        raise ValueError(
+            f"row count {n_rows} != complete pair count {expected_pairs} for "
+            f"{n} genomes; the frame is incomplete or contains mismatched data"
+        )
+
+    if expected_genomes is not None and n != expected_genomes:
+        raise ValueError(
+            f"found {n} genomes but expected {expected_genomes}; the frame "
+            f"likely contains the wrong dataset"
+        )
+
+    return n, n_rows
+
+
 def compile_kmer_stats(merged_card_df, k_min=5, k_max=50):
     """Compile a stats DataFrame from a merged union-cardinality DataFrame.
 
@@ -388,16 +427,22 @@ def compile_kmer_stats(merged_card_df, k_min=5, k_max=50):
 
 
 def generate_kmer_stats_tsv(tree_path, union_dir_path, out_path,
-                            k_min=5, k_max=50):
+                            k_min=5, k_max=50, expected_genomes=None):
     """Build and save a ``<Dataset>_kmer_stats.tsv`` from raw KMC union data.
 
     Uses ``ok_k_mer.process_kmc_union_card`` so normalization matches the other
     datasets, then writes the compiled stats to ``out_path``.
+
+    Runs ``verify_pair_count`` before writing to catch the cross-dataset
+    mislabeling bug; pass ``expected_genomes`` to also assert the clade size.
     """
     import ok_k_mer
 
     _, _, merged_card_df = ok_k_mer.process_kmc_union_card(tree_path,
                                                            union_dir_path)
+    n, n_pairs = verify_pair_count(merged_card_df,
+                                   expected_genomes=expected_genomes)
+    print(f"pair-count check OK: {n} genomes, {n_pairs} pairs")
     stats_df = compile_kmer_stats(merged_card_df, k_min=k_min, k_max=k_max)
     stats_df.to_csv(out_path, sep="\t")
     return stats_df
