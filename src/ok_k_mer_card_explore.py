@@ -100,7 +100,8 @@ def _resolve_stat_row(stats_df, stat):
 
 
 def compute_logcard_derivatives(stats_df, stat="average", smooth=False,
-                                smooth_window=5, smooth_polyorder=2):
+                                smooth_window=5, smooth_polyorder=2,
+                                method="gradient"):
     """Compute y = -log10(C(k)) and its 1st / 2nd derivatives vs k.
 
     Parameters
@@ -116,28 +117,68 @@ def compute_logcard_derivatives(stats_df, stat="average", smooth=False,
         unavailable or the window is too large for the series.
     smooth_window, smooth_polyorder : int
         Savitzky-Golay parameters (window must be odd and > polyorder).
+    method : {"gradient", "diff"}
+        How to differentiate. ``"gradient"`` (default) uses ``np.gradient``
+        (central differences; same-length, aligned to ``k``). ``"diff"`` uses
+        ``np.diff`` (forward differences), so ``d1`` has length ``n-1`` and sits
+        at the midpoints between k values, and ``d2`` has length ``n-2`` at the
+        interior integer k values. Use ``k_d1`` / ``k_d2`` for plotting.
 
     Returns
     -------
-    dict with keys ``k``, ``C``, ``y``, ``d1``, ``d2`` and, when ``smooth`` is
-    requested, ``y_s``, ``d1_s``, ``d2_s``.
+    dict with keys ``k``, ``C``, ``y``, ``d1``, ``d2`` and the matching
+    x-coordinates ``k_d1`` (for ``d1``) and ``k_d2`` (for ``d2``). When
+    ``smooth`` is requested, also ``y_s``, ``d1_s``, ``d2_s``.
     """
+    if method not in ("gradient", "diff"):
+        raise ValueError(f"method must be 'gradient' or 'diff', got {method!r}")
+
     row = _resolve_stat_row(stats_df, stat)
     k = np.asarray(stats_df.columns, dtype=float)
     C = stats_df.loc[row].to_numpy(dtype=float)
     y = -np.log10(C)
-    d1 = np.gradient(y, k)
-    d2 = np.gradient(d1, k)
 
-    out = {"k": k.astype(int), "C": C, "y": y, "d1": d1, "d2": d2}
+    d1, d2, k_d1, k_d2 = _differentiate(y, k, method)
+    out = {
+        "k": k.astype(int),
+        "C": C,
+        "y": y,
+        "d1": d1,
+        "d2": d2,
+        "k_d1": k_d1,
+        "k_d2": k_d2,
+        "method": method,
+    }
 
     if smooth:
         y_s = _savgol(y, smooth_window, smooth_polyorder)
-        d1_s = np.gradient(y_s, k)
-        d2_s = np.gradient(d1_s, k)
+        d1_s, d2_s, _, _ = _differentiate(y_s, k, method)
         out.update({"y_s": y_s, "d1_s": d1_s, "d2_s": d2_s})
 
     return out
+
+
+def _differentiate(y, k, method):
+    """Return (d1, d2, k_d1, k_d2) for ``y`` sampled at ``k`` using ``method``.
+
+    ``gradient`` keeps everything aligned to ``k``; ``diff`` returns shorter
+    arrays located at the midpoints (d1) and interior integer points (d2).
+    """
+    if method == "gradient":
+        d1 = np.gradient(y, k)
+        d2 = np.gradient(d1, k)
+        return d1, d2, k, k
+
+    # forward differences (np.diff), handling possibly non-uniform k
+    d1 = np.diff(y) / np.diff(k)
+    k_d1 = (k[:-1] + k[1:]) / 2.0          # midpoints between consecutive k
+    if len(d1) >= 2:
+        d2 = np.diff(d1) / np.diff(k_d1)
+        k_d2 = k[1:-1]                     # interior integer k values
+    else:
+        d2 = np.array([])
+        k_d2 = np.array([])
+    return d1, d2, k_d1, k_d2
 
 
 def _savgol(values, window, polyorder):
