@@ -8,9 +8,10 @@ of -log10 k-mer cardinality across GTDB phylogenies.
 The central object is a per-dataset ``stats_df`` (k-mer length as columns;
 rows ``1st quantile``..``4th quantile``, ``average``, ``standard deviation``,
 ``variance``) as written by ``explore_card.ipynb`` to ``<Dataset>_kmer_stats.tsv``.
-``C(k)`` denotes the normalized union cardinality stored in those rows
-(union cardinality / number of distinct possible canonical k-mers), so
-``C(k) -> 1`` for small k (saturation) and decays toward 0 as k grows.
+``C(k)`` denotes the raw union cardinality; the value stored in those rows
+and shown in plots is the normalized ``C(k) / 4^k`` (union cardinality /
+number of distinct possible canonical k-mers), so ``C(k) / 4^k -> 1`` for
+small k (saturation) and decays toward 0 as k grows.
 
 This module is intentionally separate from ``ok_k_mer.py``; import it in the
 notebook with ``import ok_k_mer_card_explore``.
@@ -29,8 +30,9 @@ except Exception:  # plotting is optional for headless use
     plt = None
 
 
-# Asymptotic slope of -log10(C(k)) once each genome's distinct k-mer count is
-# stable: C(k) ~= G / (4**k / 2), so -log10(C) ~= k*log10(4) - log10(2G).
+# Asymptotic slope of -log10(C(k) / 4^k) once each genome's distinct k-mer
+# count is stable: C(k) / 4^k ~= G / (4**k / 2), so
+# -log10(C(k) / 4^k) ~= k*log10(4) - log10(2G).
 ASYMPTOTIC_SLOPE = np.log10(4.0)  # ~= 0.60206
 
 # Known single-best k per dataset (from the full grid search).
@@ -101,16 +103,16 @@ def _resolve_stat_row(stats_df, stat):
 
 def compute_logcard_derivatives(stats_df, stat="average", smooth=False,
                                 smooth_window=5, smooth_polyorder=2,
-                                method="gradient"):
-    """Compute y = -log10(C(k)) and its 1st / 2nd derivatives vs k.
+                                method="gradient", transform="neglog10"):
+    """Compute y(k) and its 1st / 2nd derivatives vs k.
 
     Parameters
     ----------
     stats_df : pd.DataFrame
         Per-dataset stats (columns = k, rows = summary stats).
     stat : str
-        Which row to use as C(k). One of ``average`` (default), ``median``,
-        ``q1``/``q3``/``max`` etc. (see ``_STAT_ALIASES``).
+        Which row to use as C(k) / 4^k. One of ``average`` (default),
+        ``median``, ``q1``/``q3``/``max`` etc. (see ``_STAT_ALIASES``).
     smooth : bool
         If True, also return Savitzky-Golay-smoothed derivatives to dampen the
         discrete-step staircase. Falls back to the raw signal if SciPy is
@@ -123,6 +125,12 @@ def compute_logcard_derivatives(stats_df, stat="average", smooth=False,
         ``np.diff`` (forward differences), so ``d1`` has length ``n-1`` and sits
         at the midpoints between k values, and ``d2`` has length ``n-2`` at the
         interior integer k values. Use ``k_d1`` / ``k_d2`` for plotting.
+    transform : {"neglog10", "raw"}
+        Quantity to differentiate. ``"neglog10"`` (default) sets
+        ``y = -log10(C(k) / 4^k)``; ``"raw"`` sets ``y = C(k) / 4^k`` so the
+        derivatives are taken on the normalized cardinality fraction directly.
+        ``C`` always holds the normalized cardinality (C(k) / 4^k) regardless of
+        this choice.
 
     Returns
     -------
@@ -132,11 +140,15 @@ def compute_logcard_derivatives(stats_df, stat="average", smooth=False,
     """
     if method not in ("gradient", "diff"):
         raise ValueError(f"method must be 'gradient' or 'diff', got {method!r}")
+    if transform not in ("neglog10", "raw"):
+        raise ValueError(
+            f"transform must be 'neglog10' or 'raw', got {transform!r}"
+        )
 
     row = _resolve_stat_row(stats_df, stat)
     k = np.asarray(stats_df.columns, dtype=float)
     C = stats_df.loc[row].to_numpy(dtype=float)
-    y = -np.log10(C)
+    y = -np.log10(C) if transform == "neglog10" else C.copy()
 
     d1, d2, k_d1, k_d2 = _differentiate(y, k, method)
     out = {
@@ -148,6 +160,7 @@ def compute_logcard_derivatives(stats_df, stat="average", smooth=False,
         "k_d1": k_d1,
         "k_d2": k_d2,
         "method": method,
+        "transform": transform,
     }
 
     if smooth:
@@ -197,22 +210,34 @@ def _savgol(values, window, polyorder):
 
 
 def plot_logcard_dynamics(name, stats_df, opt_k=None, stat="average",
-                          smooth=False, ax=None):
-    """3-panel plot of y=-log10(C), d1, d2 vs k, marking the known optimum.
+                          smooth=False, ax=None, transform="neglog10"):
+    """3-panel plot of y(k), d1, d2 vs k, marking the known optimum.
+
+    ``transform="neglog10"`` (default) plots ``y = -log10(C(k) / 4^k)``;
+    ``transform="raw"`` plots the normalized cardinality ``y = C(k) / 4^k``
+    directly. The derivatives are taken on whichever quantity is chosen.
 
     Returns the Matplotlib ``Figure``.
     """
     if plt is None:
         raise RuntimeError("matplotlib is not available")
 
-    d = compute_logcard_derivatives(stats_df, stat=stat, smooth=smooth)
+    d = compute_logcard_derivatives(stats_df, stat=stat, smooth=smooth,
+                                    transform=transform)
     k = d["k"]
     if opt_k is None:
         opt_k = KNOWN_BEST_K.get(name)
 
+    if transform == "neglog10":
+        y_label = "y = -log10(C(k) / 4^k)"
+        metric_label = "-log10 normalized k-mer cardinality"
+    else:
+        y_label = "y = C(k) / 4^k"
+        metric_label = "normalized k-mer cardinality"
+
     fig, axes = plt.subplots(3, 1, figsize=(8, 9), sharex=True)
     panels = [
-        ("y = -log10(C(k))", "y", "y_s"),
+        (y_label, "y", "y_s"),
         ("d/dk  (1st derivative)", "d1", "d1_s"),
         ("d2/dk2  (2nd derivative)", "d2", "d2_s"),
     ]
@@ -221,7 +246,8 @@ def plot_logcard_dynamics(name, stats_df, opt_k=None, stat="average",
                   color="C0", label="raw")
         if smooth and smooth_key in d:
             ax_i.plot(k, d[smooth_key], lw=1.5, color="C1", label="smoothed")
-        if raw_key == "d1":
+        # The log10(4) asymptote only applies to the -log10 transform.
+        if raw_key == "d1" and transform == "neglog10":
             ax_i.axhline(ASYMPTOTIC_SLOPE, color="grey", ls="--", lw=1,
                          label=f"log10(4)={ASYMPTOTIC_SLOPE:.3f}")
         if raw_key == "d2":
@@ -236,7 +262,7 @@ def plot_logcard_dynamics(name, stats_df, opt_k=None, stat="average",
     axes[-1].set_xlabel("k-mer length")
     axes[-1].set_xticks(k)
     axes[-1].set_xticklabels(k, fontsize=7, rotation=90)
-    axes[0].set_title(f"{name}: -log10 k-mer cardinality dynamics ({stat})")
+    axes[0].set_title(f"{name}: {metric_label} dynamics ({stat})")
     fig.tight_layout()
     return fig
 
@@ -376,10 +402,10 @@ def compute_spread_dynamics(stats_df):
 
 
 def fit_effective_genome_size(stats_df, stat="average", k_fit_min=16):
-    """Fit effective genome size G from the linear tail of -log10(C(k)).
+    """Fit effective genome size G from the linear tail of -log10(C(k) / 4^k).
 
-    In the unsaturated regime ``C(k) ~= G / (4**k / 2)`` so
-    ``-log10(C) ~= k*log10(4) - log10(2G)``. Fitting the intercept over
+    In the unsaturated regime ``C(k) / 4^k ~= G / (4**k / 2)`` so
+    ``-log10(C(k) / 4^k) ~= k*log10(4) - log10(2G)``. Fitting the intercept over
     ``k >= k_fit_min`` recovers ``G``.
 
     Returns ``(G, slope, intercept)``.
@@ -395,7 +421,7 @@ def fit_effective_genome_size(stats_df, stat="average", k_fit_min=16):
 
 
 def theoretical_card(k, G):
-    """Theoretical normalized union cardinality C(k) = min(1, G / (4**k / 2))."""
+    """Theoretical normalized union cardinality C(k) / 4^k = min(1, G / (4**k / 2))."""
     k = np.asarray(k, dtype=float)
     denom = (4.0 ** k) / 2.0
     return np.minimum(1.0, G / denom)
