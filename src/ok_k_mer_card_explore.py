@@ -97,13 +97,45 @@ def _resolve_stat_row(stats_df, stat):
     return key
 
 
+def num_distinct_canonical_kmers(k):
+    """Number of distinct canonical k-mers (reverse-complement collapsed).
+
+    Matches the normalizer used in ``ok_k_mer.build_merged_kmc_union_card``:
+    for even k, ``(4**k - 4**(k/2)) / 2 + 4**(k/2)``; for odd k, ``4**k / 2``.
+    Accepts a scalar or array of k and returns a float array.
+    """
+    k = np.asarray(k, dtype=float)
+    num_pal = 4.0 ** (k / 2.0)
+    even = (4.0 ** k - num_pal) / 2.0 + num_pal
+    odd = 4.0 ** k / 2.0
+    return np.where(k % 2 == 0, even, odd)
+
+
+def denormalize_stats_df(stats_df):
+    """Convert normalized stats (C(k) / 4^k) back to raw cardinality C(k).
+
+    Multiplies each per-k column by ``num_distinct_canonical_kmers(k)``. Linear
+    stats (quantiles, average, standard deviation) scale by that factor;
+    ``variance`` scales by the factor squared. This is exact because every pair
+    in a given k column was divided by the same constant.
+    """
+    k = np.asarray(stats_df.columns, dtype=float)
+    factor = num_distinct_canonical_kmers(k)
+    out = stats_df.copy()
+    for row in out.index:
+        scale = factor ** 2 if row == "variance" else factor
+        out.loc[row] = out.loc[row].to_numpy(dtype=float) * scale
+    return out
+
+
 ################################################################################
 # Derivative analysis (the requested idea)
 
 
 def compute_logcard_derivatives(stats_df, stat="average", smooth=False,
                                 smooth_window=5, smooth_polyorder=2,
-                                method="gradient", transform="neglog10"):
+                                method="gradient", transform="neglog10",
+                                normalized=True):
     """Compute y(k) and its 1st / 2nd derivatives vs k.
 
     Parameters
@@ -126,11 +158,16 @@ def compute_logcard_derivatives(stats_df, stat="average", smooth=False,
         at the midpoints between k values, and ``d2`` has length ``n-2`` at the
         interior integer k values. Use ``k_d1`` / ``k_d2`` for plotting.
     transform : {"neglog10", "raw"}
-        Quantity to differentiate. ``"neglog10"`` (default) sets
-        ``y = -log10(C(k) / 4^k)``; ``"raw"`` sets ``y = C(k) / 4^k`` so the
-        derivatives are taken on the normalized cardinality fraction directly.
-        ``C`` always holds the normalized cardinality (C(k) / 4^k) regardless of
-        this choice.
+        Whether to apply the -log10 transform. ``"neglog10"`` (default) sets
+        ``y = -log10(.)``; ``"raw"`` differentiates the cardinality directly
+        (no log).
+    normalized : bool
+        Whether to use the normalized cardinality ``C(k) / 4^k`` (default,
+        ``True``) or the raw cardinality ``C(k)``. ``stats_df`` is assumed to
+        store the normalized form (as the saved TSVs do); when ``normalized`` is
+        ``False`` the per-k column is multiplied back by
+        ``num_distinct_canonical_kmers(k)`` to recover the raw count. ``C`` in
+        the returned dict reflects this choice.
 
     Returns
     -------
@@ -148,6 +185,8 @@ def compute_logcard_derivatives(stats_df, stat="average", smooth=False,
     row = _resolve_stat_row(stats_df, stat)
     k = np.asarray(stats_df.columns, dtype=float)
     C = stats_df.loc[row].to_numpy(dtype=float)
+    if not normalized:
+        C = C * num_distinct_canonical_kmers(k)
     y = -np.log10(C) if transform == "neglog10" else C.copy()
 
     d1, d2, k_d1, k_d2 = _differentiate(y, k, method)
@@ -161,6 +200,7 @@ def compute_logcard_derivatives(stats_df, stat="average", smooth=False,
         "k_d2": k_d2,
         "method": method,
         "transform": transform,
+        "normalized": normalized,
     }
 
     if smooth:
@@ -210,12 +250,14 @@ def _savgol(values, window, polyorder):
 
 
 def plot_logcard_dynamics(name, stats_df, opt_k=None, stat="average",
-                          smooth=False, ax=None, transform="neglog10"):
+                          smooth=False, ax=None, transform="neglog10",
+                          normalized=True):
     """3-panel plot of y(k), d1, d2 vs k, marking the known optimum.
 
-    ``transform="neglog10"`` (default) plots ``y = -log10(C(k) / 4^k)``;
-    ``transform="raw"`` plots the normalized cardinality ``y = C(k) / 4^k``
-    directly. The derivatives are taken on whichever quantity is chosen.
+    ``normalized=True`` (default) uses ``C(k) / 4^k``; ``normalized=False`` uses
+    the raw cardinality ``C(k)``. ``transform="neglog10"`` (default) plots
+    ``y = -log10(.)``; ``transform="raw"`` plots the cardinality directly. The
+    derivatives are taken on whichever quantity is chosen.
 
     Returns the Matplotlib ``Figure``.
     """
@@ -223,17 +265,19 @@ def plot_logcard_dynamics(name, stats_df, opt_k=None, stat="average",
         raise RuntimeError("matplotlib is not available")
 
     d = compute_logcard_derivatives(stats_df, stat=stat, smooth=smooth,
-                                    transform=transform)
+                                    transform=transform, normalized=normalized)
     k = d["k"]
     if opt_k is None:
         opt_k = KNOWN_BEST_K.get(name)
 
+    base = "C(k) / 4^k" if normalized else "C(k)"
+    qualifier = "normalized" if normalized else "raw"
     if transform == "neglog10":
-        y_label = "y = -log10(C(k) / 4^k)"
-        metric_label = "-log10 normalized k-mer cardinality"
+        y_label = f"y = -log10({base})"
+        metric_label = f"-log10 {qualifier} k-mer cardinality"
     else:
-        y_label = "y = C(k) / 4^k"
-        metric_label = "normalized k-mer cardinality"
+        y_label = f"y = {base}"
+        metric_label = f"{qualifier} k-mer cardinality"
 
     fig, axes = plt.subplots(3, 1, figsize=(8, 9), sharex=True)
     panels = [
@@ -246,8 +290,8 @@ def plot_logcard_dynamics(name, stats_df, opt_k=None, stat="average",
                   color="C0", label="raw")
         if smooth and smooth_key in d:
             ax_i.plot(k, d[smooth_key], lw=1.5, color="C1", label="smoothed")
-        # The log10(4) asymptote only applies to the -log10 transform.
-        if raw_key == "d1" and transform == "neglog10":
+        # The log10(4) asymptote only applies to -log10 of the normalized C(k).
+        if raw_key == "d1" and transform == "neglog10" and normalized:
             ax_i.axhline(ASYMPTOTIC_SLOPE, color="grey", ls="--", lw=1,
                          label=f"log10(4)={ASYMPTOTIC_SLOPE:.3f}")
         if raw_key == "d2":
@@ -468,11 +512,16 @@ def verify_pair_count(merged_card_df, expected_genomes=None):
     return n, n_rows
 
 
-def compile_kmer_stats(merged_card_df, k_min=5, k_max=50):
+def compile_kmer_stats(merged_card_df, k_min=5, k_max=50, normalize=True):
     """Compile a stats DataFrame from a merged union-cardinality DataFrame.
 
     Mirrors the logic in ``explore_card.ipynb`` (cell 38) so a missing dataset
     TSV can be regenerated consistently.
+
+    ``ok_k_mer.process_kmc_union_card`` already divides by the number of
+    possible canonical k-mers, so the columns are the normalized ``C(k) / 4^k``.
+    With ``normalize=False`` the compiled stats are de-normalized back to the
+    raw cardinality ``C(k)`` via ``denormalize_stats_df``.
     """
     cols = [f"k{k}_cardinality" for k in range(k_min, k_max + 1)
             if f"k{k}_cardinality" in merged_card_df.columns]
@@ -490,15 +539,19 @@ def compile_kmer_stats(merged_card_df, k_min=5, k_max=50):
     ).T
     stats_df.columns = [int(c[1:].split("_")[0]) for c in cols]
     stats_df.columns.name = "k"
+    if not normalize:
+        stats_df = denormalize_stats_df(stats_df)
     return stats_df
 
 
 def generate_kmer_stats_tsv(tree_path, union_dir_path, out_path,
-                            k_min=5, k_max=50, expected_genomes=None):
+                            k_min=5, k_max=50, expected_genomes=None,
+                            normalize=True):
     """Build and save a ``<Dataset>_kmer_stats.tsv`` from raw KMC union data.
 
     Uses ``ok_k_mer.process_kmc_union_card`` so normalization matches the other
-    datasets, then writes the compiled stats to ``out_path``.
+    datasets, then writes the compiled stats to ``out_path``. Set
+    ``normalize=False`` to save the raw (un-normalized) cardinality C(k).
 
     Runs ``verify_pair_count`` before writing to catch the cross-dataset
     mislabeling bug; pass ``expected_genomes`` to also assert the clade size.
@@ -510,6 +563,23 @@ def generate_kmer_stats_tsv(tree_path, union_dir_path, out_path,
     n, n_pairs = verify_pair_count(merged_card_df,
                                    expected_genomes=expected_genomes)
     print(f"pair-count check OK: {n} genomes, {n_pairs} pairs")
-    stats_df = compile_kmer_stats(merged_card_df, k_min=k_min, k_max=k_max)
+    stats_df = compile_kmer_stats(merged_card_df, k_min=k_min, k_max=k_max,
+                                  normalize=normalize)
     stats_df.to_csv(out_path, sep="\t")
     return stats_df
+
+
+def save_raw_stats_tsvs(in_dir, out_dir, pattern="*_kmer_stats.tsv"):
+    """Write raw (un-normalized) copies of normalized stats TSVs.
+
+    Loads every normalized ``*_kmer_stats.tsv`` in ``in_dir``, de-normalizes it
+    to raw cardinality C(k) with ``denormalize_stats_df``, and writes the result
+    to ``out_dir`` under the same filename. Returns the list of output paths.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    written = []
+    for name, stats_df in load_all_kmer_stats(in_dir, pattern=pattern).items():
+        out_path = os.path.join(out_dir, f"{name}_kmer_stats.tsv")
+        denormalize_stats_df(stats_df).to_csv(out_path, sep="\t")
+        written.append(out_path)
+    return written
