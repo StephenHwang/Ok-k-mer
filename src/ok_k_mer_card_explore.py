@@ -311,6 +311,165 @@ def plot_logcard_dynamics(name, stats_df, opt_k=None, stat="average",
     return fig
 
 
+def _aggregate_card_series(card_df, stat="average", spread=None):
+    """Aggregate a per-pair card frame into a per-k normalized series.
+
+    Picks out the ``k{k}_cardinality`` columns (already stored as the normalized
+    ``C(k) / 4^k``) and aggregates across genome pairs with the mean (default)
+    or median.
+
+    Returns ``(k, central)`` sorted by ascending k. When ``spread`` is given,
+    also returns lower/upper bounds describing the pairwise distribution at each
+    k: ``(k, central, lo, hi)``. ``spread`` may be:
+
+    - ``"iqr"``: 25th / 75th percentiles across pairs.
+    - ``"minmax"``: minimum / maximum across pairs.
+    - ``"std"``: central +/- one standard deviation.
+    """
+    cols = [c for c in card_df.columns if re.fullmatch(r"k\d+_cardinality", str(c))]
+    k = np.array([int(str(c)[1:].split("_")[0]) for c in cols])
+    order = np.argsort(k)
+    cols = [cols[i] for i in order]
+    sub = card_df[cols].apply(pd.to_numeric, errors="coerce")
+    agg = sub.median() if stat in ("median", "q2", "2nd quantile") else sub.mean()
+    central = agg.to_numpy(dtype=float)
+    if spread is None:
+        return k[order], central
+    if spread == "iqr":
+        lo = sub.quantile(0.25).to_numpy(dtype=float)
+        hi = sub.quantile(0.75).to_numpy(dtype=float)
+    elif spread == "minmax":
+        lo = sub.min().to_numpy(dtype=float)
+        hi = sub.max().to_numpy(dtype=float)
+    elif spread == "std":
+        s = sub.std().to_numpy(dtype=float)
+        lo, hi = central - s, central + s
+    else:
+        raise ValueError(
+            f"spread must be None, 'iqr', 'minmax' or 'std', got {spread!r}"
+        )
+    return k[order], central, lo, hi
+
+
+def plot_union_intersection_card(name, union_card_df, intersection_card_df,
+                                 opt_k=None, stat="average", logy_raw=True,
+                                 max_k=None, spread="iqr", show_median=True):
+    """Two-panel plot of union vs intersection k-mer cardinality vs k.
+
+    Top panel shows the raw (non-normalized) cardinality ``C(k)`` (on a log
+    y-axis by default, since it spans ~``4^k``); bottom panel shows the
+    normalized ``C(k) / 4^k`` using ``num_distinct_canonical_kmers``. Both union
+    and intersection are drawn over their own available k-range. ``opt_k`` (the
+    best single k, defaulting to ``KNOWN_BEST_K[name]``) is marked with a red
+    dotted vertical line. ``max_k`` (if given) caps the plotted k-range to
+    ``k <= max_k``.
+
+    ``spread`` shades the pairwise distribution around each central line:
+    ``"iqr"`` (default, 25th-75th percentile), ``"minmax"``, ``"std"``, or
+    ``None`` to draw only the central line.
+
+    ``show_median`` (default True) overlays a dashed per-pair median line. This
+    is useful because the per-pair distribution is right-skewed, so the mean can
+    sit outside the IQR band while the median always lies within it.
+
+    Returns the Matplotlib ``Figure``.
+    """
+    if plt is None:
+        raise RuntimeError("matplotlib is not available")
+
+    res_u = _aggregate_card_series(union_card_df, stat=stat, spread=spread)
+    res_i = _aggregate_card_series(intersection_card_df, stat=stat, spread=spread)
+    if spread is None:
+        (k_u, norm_u), (k_i, norm_i) = res_u, res_i
+        lo_u = hi_u = lo_i = hi_i = None
+    else:
+        k_u, norm_u, lo_u, hi_u = res_u
+        k_i, norm_i, lo_i, hi_i = res_i
+
+    central_name = "median" if stat in ("median", "q2", "2nd quantile") else "mean"
+    add_median = show_median and central_name != "median"
+    if add_median:
+        _, med_u = _aggregate_card_series(union_card_df, stat="median")
+        _, med_i = _aggregate_card_series(intersection_card_df, stat="median")
+    else:
+        med_u = med_i = None
+
+    def _apply_max_k(k, *arrays):
+        if max_k is None:
+            return (k, *arrays)
+        m = k <= max_k
+        return (k[m], *(None if a is None else a[m] for a in arrays))
+
+    k_u, norm_u, lo_u, hi_u, med_u = _apply_max_k(k_u, norm_u, lo_u, hi_u, med_u)
+    k_i, norm_i, lo_i, hi_i, med_i = _apply_max_k(k_i, norm_i, lo_i, hi_i, med_i)
+
+    factor_u = num_distinct_canonical_kmers(k_u)
+    factor_i = num_distinct_canonical_kmers(k_i)
+    raw_u = norm_u * factor_u
+    raw_i = norm_i * factor_i
+
+    if opt_k is None:
+        opt_k = KNOWN_BEST_K.get(name)
+
+    fig, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(8, 7), sharex=True)
+
+    def _pos(a):
+        # mask non-positive values so a log-scaled band has no -inf edges
+        return np.where(np.asarray(a, dtype=float) > 0, a, np.nan)
+
+    if spread is not None:
+        ax_top.fill_between(k_u, _pos(lo_u * factor_u), _pos(hi_u * factor_u),
+                            color="C0", alpha=0.2, lw=0)
+        ax_top.fill_between(k_i, _pos(lo_i * factor_i), _pos(hi_i * factor_i),
+                            color="C1", alpha=0.2, lw=0)
+    ax_top.plot(k_u, raw_u, marker="o", markersize=3, lw=1.5, color="C0",
+                label=f"union ({central_name})")
+    ax_top.plot(k_i, raw_i, marker="s", markersize=3, lw=1.5, color="C1",
+                label=f"intersection ({central_name})")
+    if add_median:
+        ax_top.plot(k_u, _pos(med_u * factor_u), ls="--", lw=1.2, color="C0",
+                    label="union (median)")
+        ax_top.plot(k_i, _pos(med_i * factor_i), ls="--", lw=1.2, color="C1",
+                    label="intersection (median)")
+    if logy_raw:
+        ax_top.set_yscale("log")
+    ax_top.set_ylabel("cardinality C(k)")
+
+    if spread is not None:
+        ax_bot.fill_between(k_u, lo_u, hi_u, color="C0", alpha=0.2, lw=0)
+        ax_bot.fill_between(k_i, lo_i, hi_i, color="C1", alpha=0.2, lw=0)
+    ax_bot.plot(k_u, norm_u, marker="o", markersize=3, lw=1.5, color="C0",
+                label=f"union ({central_name})")
+    ax_bot.plot(k_i, norm_i, marker="s", markersize=3, lw=1.5, color="C1",
+                label=f"intersection ({central_name})")
+    if add_median:
+        ax_bot.plot(k_u, med_u, ls="--", lw=1.2, color="C0",
+                    label="union (median)")
+        ax_bot.plot(k_i, med_i, ls="--", lw=1.2, color="C1",
+                    label="intersection (median)")
+    ax_bot.set_ylabel("C(k) / 4^k")
+    ax_bot.set_xlabel("k-mer length")
+
+    spread_label = {"iqr": "IQR", "minmax": "min-max", "std": "+/-1 std"}.get(spread)
+    lines_note = f"{central_name}+median" if add_median else central_name
+    band_note = f" (lines={lines_note}, band={spread_label})" if spread else \
+        f" ({lines_note})"
+    ax_top.set_title(f"{name}: union vs intersection k-mer cardinality{band_note}")
+
+    k_all = np.union1d(k_u, k_i).astype(int)
+    for ax in (ax_top, ax_bot):
+        if opt_k is not None:
+            ax.axvline(opt_k, color="red", ls=":", lw=1.5,
+                       label=f"best k={opt_k}")
+        ax.grid(True, ls=":", alpha=0.4)
+        ax.legend(loc="best", frameon=False, fontsize=8)
+    ax_bot.set_xticks(k_all)
+    ax_bot.set_xticklabels(k_all, fontsize=7, rotation=90)
+
+    fig.tight_layout()
+    return fig
+
+
 ################################################################################
 # Candidate single-k estimators (derivative-based)
 
