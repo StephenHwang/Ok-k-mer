@@ -170,8 +170,25 @@ def plot_tree(tree_path, name=None, outpath=None, width=1500, scale=2000,
 ################################################################################
 # Per-node correlation / weighting
 
+def _fast_rank(values):
+    """Dense competition-free ranks via argsort (ties broken by position).
+
+    Much faster than `scipy.stats.rankdata`; ties are negligible for the
+    continuous weighted rank-sums swept here.
+    """
+    order = values.argsort()
+    ranks = np.empty(len(values), dtype=np.float64)
+    ranks[order] = np.arange(len(values), dtype=np.float64)
+    return ranks
+
+
 def _sweep_best_corr(sub_df, k_low=6, k_high=40, w_step=0.05):
-    """Sweep single-k and two-k weighted correlations for one set of pairs.
+    """Find the globally best single-k and two-k weighted correlation.
+
+    Sweeps every single k in ``[k_low, k_high]`` and **every** pair of ks across
+    **every** weight in ``(0, 1)`` (step `w_step`), returning the most-negative
+    (Spearman) correlation against ``tree_distance``. This is an exhaustive
+    global search, not a search restricted to single-k local minima.
 
     Args:
         sub_df: Rows of `merged_df` (one per genome pair) with a `tree_distance`
@@ -181,27 +198,36 @@ def _sweep_best_corr(sub_df, k_low=6, k_high=40, w_step=0.05):
 
     Returns:
         tuple: ``(local_minima, weighted_minima, best_corr)``.
-            - ``local_minima``: list of ``(k, corr)`` sorted best (most negative)
-              first.
-            - ``weighted_minima``: ``(k1, k2, w, corr)`` or all-``None``.
-            - ``best_corr``: ``None``, a ``(k, corr)`` single-k tuple, or a
-              ``(k1, k2, w, corr)`` weighted-pair tuple.
+            - ``local_minima``: list of single-k ``(k, corr)`` sorted best (most
+              negative) first (reported for reference).
+            - ``weighted_minima``: the globally best ``(k1, k2, w, corr)`` over
+              all k-pairs and weights, or all-``None`` if none.
+            - ``best_corr``: the better of the best single-k and the best
+              weighted pair; ``None``, a ``(k, corr)`` tuple, or a
+              ``(k1, k2, w, corr)`` tuple.
+
+    Note:
+        The exhaustive pair sweep is ``O(K^2 * W)`` correlations per call (vs.
+        ``O(W)`` for a single pair), so this is markedly slower on large k ranges
+        / many genome pairs. Increase `w_step` to trade resolution for speed.
     """
     if len(sub_df) < 3:  # too few comparisons to be meaningful
         return [], (None, None, None, None), None
 
     tree_dist = sub_df["tree_distance"]
+    ks = [k for k in range(k_low, k_high + 1)
+          if f"k{k}_distance" in sub_df.columns]
 
-    # Sweep single-k correlations.
+    # Precompute each k's rank vector once; collect single-k correlations.
+    rank_cache = {}
     correlations = []
-    for k in range(k_low, k_high + 1):
-        col = f"k{k}_distance"
-        if col not in sub_df.columns:
-            continue
-        corr, _ = spearmanr(sub_df[col], tree_dist)
+    for k in ks:
+        col = sub_df[f"k{k}_distance"]
+        rank_cache[k] = col.rank().to_numpy()
+        corr, _ = spearmanr(col, tree_dist)
         correlations.append((k, corr))
 
-    # Local minima (more negative than both neighbors).
+    # Single-k local minima (reported for reference only).
     local_minima = []
     for i in range(1, len(correlations) - 1):
         k, corr = correlations[i]
@@ -209,27 +235,42 @@ def _sweep_best_corr(sub_df, k_low=6, k_high=40, w_step=0.05):
             local_minima.append((k, corr))
     local_minima = sorted(local_minima, key=lambda x: x[1])  # best (most neg) first
 
-    # Weighted average of the two best local minima.
-    k1 = k2 = best_w = best_w_corr = None
-    if len(local_minima) >= 2:
-        k1 = local_minima[0][0]
-        k2 = local_minima[1][0]
-        k1_ranks = sub_df[f"k{k1}_distance"].rank()
-        k2_ranks = sub_df[f"k{k2}_distance"].rank()
-        weighted_corrs = []
-        for w in np.arange(w_step, 1.0, w_step):
-            w = round(w, 2)
-            weighted_ranks = w * k1_ranks + (1 - w) * k2_ranks
-            corr, _ = spearmanr(weighted_ranks, tree_dist)
-            weighted_corrs.append((w, corr))
-        best_w, best_w_corr = min(weighted_corrs, key=lambda x: x[1])
-    weighted_minima = (k1, k2, best_w, best_w_corr)
+    # Globally best single k.
+    valid_single = [(k, c) for k, c in correlations if not np.isnan(c)]
+    best_single = min(valid_single, key=lambda x: x[1]) if valid_single else None
 
-    # Best overall: weighted pair vs best single-k local minimum.
-    if best_w_corr is not None and best_w_corr < local_minima[0][1]:
-        best_corr = (k1, k2, best_w, best_w_corr)
-    elif local_minima:
-        best_corr = local_minima[0]
+    # Fast Spearman vs tree_distance: rank + center the target once, then for
+    # each candidate only its ranks change.
+    t_centered = tree_dist.rank().to_numpy()
+    t_centered = t_centered - t_centered.mean()
+    t_norm = np.sqrt((t_centered ** 2).sum())
+
+    def fast_spearman(values):
+        vr = _fast_rank(values)
+        vr = vr - vr.mean()
+        denom = np.sqrt((vr ** 2).sum()) * t_norm
+        if denom == 0:
+            return np.nan
+        return float((vr * t_centered).sum() / denom)
+
+    # Exhaustive sweep over every k-pair and every weight.
+    weights = [round(w, 2) for w in np.arange(w_step, 1.0, w_step)]
+    best_pair = None  # (k1, k2, w, corr)
+    for i in range(len(ks)):
+        r1 = rank_cache[ks[i]]
+        for j in range(i + 1, len(ks)):
+            r2 = rank_cache[ks[j]]
+            for w in weights:
+                corr = fast_spearman(w * r1 + (1 - w) * r2)
+                if not np.isnan(corr) and (best_pair is None or corr < best_pair[3]):
+                    best_pair = (ks[i], ks[j], w, corr)
+    weighted_minima = best_pair if best_pair is not None else (None, None, None, None)
+
+    # Best overall: globally best weighted pair vs globally best single k.
+    if best_pair is not None and (best_single is None or best_pair[3] < best_single[1]):
+        best_corr = best_pair
+    elif best_single is not None:
+        best_corr = best_single
     else:
         best_corr = None
 
@@ -242,11 +283,11 @@ def compute_node_annotations(tree, merged_df, k_low=6, k_high=40, w_step=0.05,
 
     For each internal node, the II set is every pair of leaves under it. The
     correlation between each ``k{k}_distance`` (ranked) and ``tree_distance`` is
-    swept over ``[k_low, k_high]``. Local minima (most-negative correlations) are
-    found, and the two best minima are combined via a weighted average of their
-    ranks to look for a stronger correlation. ``best_corr`` is whichever is
-    better (most negative) between the best single-k minimum and the best
-    weighted pair.
+    swept over ``[k_low, k_high]``, and an exhaustive global search over every
+    pair of ks and every weight looks for the most-negative weighted-rank
+    correlation. ``best_corr`` is whichever is better (most negative) between the
+    globally best single k and the globally best weighted pair (see
+    `_sweep_best_corr`).
 
     Args:
         tree: A tree from `load_named_tree` (internal nodes must be named).
@@ -502,11 +543,11 @@ def plot_tree_annotated(tree, node_info, name=None, k_low=6, k_high=40,
                 colors = [k_color.get(k1, "#808080"), k_color.get(k2, "#808080")]
                 weights = [w * 100, (1 - w) * 100]
                 label = f"k={k1},{k2}\nw={w}\ncorr={round(corr, 3)}"
-            else:                                  # single k (k, corr)
+            else:                                  # single k (k, corr) -> w=1.0
                 k, corr = best
                 colors = [k_color.get(k, "#808080")]
                 weights = [100]
-                label = f"k={k}\ncorr={round(corr, 3)}"
+                label = f"k={k}\nw=1.0\ncorr={round(corr, 3)}"
 
             if show_weight:
                 pie = faces.PieChartFace(weights, colors=colors, width=50, height=50)
@@ -683,6 +724,58 @@ def global_consistency(tree, merged_df, fracs, n_runs=10, k_low=6, k_high=40,
     return out
 
 
+def global_effective_match_consistency(tree, merged_df, fracs, n_runs=10,
+                                       k_low=6, k_high=40, w_step=0.05, seed=0,
+                                       tol=1):
+    """Whole-tree effective-k match rate vs masking fraction.
+
+    A lighter variant of `global_consistency` that computes only the effective
+    match rate: for each masking fraction it masks `n_runs` random genome
+    subsets, recomputes the whole-tree (root) recommendation on the remaining
+    genomes, and flags a match when the masked ``k_eff`` is within `tol` of the
+    full-data ``k_eff``. The Kendall-tau / dispersion / correlation-retention
+    measures are skipped, so this is considerably faster.
+
+    Args:
+        tree: Named tree.
+        merged_df: Dataset distances (`genome_pair`/`genome_1`/`genome_2`,
+            `tree_distance`, `k{K}_distance`).
+        fracs: Iterable of masking fractions in ``[0, 1)``.
+        n_runs: Random masking repeats per fraction.
+        k_low, k_high, w_step: Sweep parameters.
+        seed: Master RNG seed.
+        tol: ``|k_eff|`` tolerance (k units) for the match flag.
+
+    Returns:
+        pd.DataFrame: one row per (frac, run) with columns ``frac, run, k_eff,
+        matched``. ``df.attrs['full']`` holds the full-data summary.
+    """
+    df = _as_pair_indexed(merged_df)
+    _, _, best_full = _sweep_best_corr(df, k_low, k_high, w_step)
+    full = recommendation_summary(best_full)
+
+    rng_master = np.random.default_rng(seed)
+    rows = []
+    for frac in fracs:
+        for run in range(n_runs):
+            run_seed = int(rng_master.integers(0, 2**31 - 1))
+            masked = mask_genomes(tree, frac, seed=run_seed)
+            keep = ~(df["genome_1"].isin(masked) | df["genome_2"].isin(masked))
+            sub = df[keep]
+
+            _, _, best_m = _sweep_best_corr(sub, k_low, k_high, w_step)
+            k_eff = recommendation_summary(best_m)["k_eff"]
+            rows.append({
+                "frac": float(frac), "run": run, "k_eff": k_eff,
+                "matched": bool(abs(k_eff - full["k_eff"]) <= tol)
+                if not np.isnan(k_eff) else False,
+            })
+
+    out = pd.DataFrame(rows)
+    out.attrs["full"] = full
+    return out
+
+
 def node_consistency(tree, merged_df, fracs, n_runs=5, k_low=6, k_high=40,
                      w_step=0.05, seed=0, tol=1):
     """Per-internal-node recommendation robustness vs masking fraction.
@@ -782,6 +875,18 @@ def plot_global_consistency(results_df, name, display=True):
                     "ktau degradation vs truth", color="C4")
     axes[3].legend(frameon=False, fontsize=8)
     fig.suptitle(f"{name}: whole-tree recommendation robustness")
+    fig.tight_layout()
+    if display:
+        plt.show()
+    return fig
+
+
+def plot_global_effective_match_consistency(results_df, name, display=True):
+    """Plot only the whole-tree effective-k match rate vs masking fraction."""
+    fig, ax = plt.subplots(1, 1, figsize=(6, 4))
+    _plot_mean_band(ax, results_df, "matched", "effective match rate (+/-1 k)")
+    ax.set_ylim(-0.05, 1.05)
+    fig.suptitle(f"{name}: whole-tree effective-k match rate")
     fig.tight_layout()
     if display:
         plt.show()
