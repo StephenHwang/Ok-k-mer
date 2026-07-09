@@ -303,9 +303,10 @@ def plot_1k_colorbar_corr(name, df, k_low=6, k_high=40, cmap_vmax=None):
         )
 
 
-    xtick_pos = np.arange(0, len(k_vals), 2)
+    xtick_pos = np.arange(len(k_vals))
     ax.set_xticks(xtick_pos)
-    ax.set_xticklabels(k_vals[xtick_pos], fontsize=8)
+    xtick_labels = [str(k) if i % 2 == 0 else "" for i, k in enumerate(k_vals)]
+    ax.set_xticklabels(xtick_labels, fontsize=8)
     ax.set_yticks([])
     ax.set_ylabel("")
     ax.set_xlabel("k-mer length")
@@ -313,19 +314,19 @@ def plot_1k_colorbar_corr(name, df, k_low=6, k_high=40, cmap_vmax=None):
 
     # Draw a black edge around every location where the correlation is maximal (including ties)
     max_corr = np.nanmax(corr_vals)
-    best_xs = np.where(np.isclose(corr_vals, max_corr))[0]
-    for best_x in best_xs:
-        rect = plt.Rectangle(
-            (best_x - 0.5, -0.5),
-            1,
-            1,
-            linewidth=2.5,
-            edgecolor="black",
-            facecolor="none",
-        )
-        ax.add_patch(rect)
+    # best_xs = np.where(np.isclose(corr_vals, max_corr))[0]
+    # for best_x in best_xs:
+    #     rect = plt.Rectangle(
+    #         (best_x - 0.5, -0.5),
+    #         1,
+    #         1,
+    #         linewidth=2.5,
+    #         edgecolor="black",
+    #         facecolor="none",
+    #     )
+    #     ax.add_patch(rect)
 
-    fig.colorbar(im, ax=ax, label="Spearman corr")
+    fig.colorbar(im, ax=ax, label="Spearman correlation")
     plt.show()
 
 ################################################################################
@@ -509,34 +510,33 @@ def plot_2k_grid_joint_corr_weight(name, results_matrix, k_low, k_high, cmap_vma
 
     xticks = yticks = list(range(n_ks))
     ax.set_xticks(xticks)
-    ax.set_xticklabels(ks, fontsize=8, rotation=90)
+    xlabels = [str(k) if i % 2 == 0 else "" for i, k in enumerate(ks)]
+    ax.set_xticklabels(xlabels, fontsize=8)
     ax.set_yticks(yticks)
-    ax.set_yticklabels(ks, fontsize=8)
+    ax.set_yticklabels(xlabels, fontsize=8)
 
-    # Optional: mark the globally max (best) cell
-    max_val = np.nanmax(aggregate_matrix[np.isfinite(aggregate_matrix)])
-    min_indices = np.where(aggregate_matrix == max_val)
-    print(min_indices, max_val)
-    if len(min_indices[0]) > 0:
-        y, x = min_indices[0][0], min_indices[1][0]
-        ax.add_patch(plt.Rectangle((x-0.5, y-0.5), 1, 1, fill=False, edgecolor='black', lw=2.5))
+    ## Optional: mark the globally max (best) cell
+    #max_val = np.nanmax(aggregate_matrix[np.isfinite(aggregate_matrix)])
+    #min_indices = np.where(aggregate_matrix == max_val)
+    #print(min_indices, max_val)
+    #if len(min_indices[0]) > 0:
+    #    y, x = min_indices[0][0], min_indices[1][0]
+    #    ax.add_patch(plt.Rectangle((x-0.5, y-0.5), 1, 1, fill=False, edgecolor='black', lw=2.5))
 
     # Main heatmap colorbar (Spearman correlation)
-    cbar = fig.colorbar(im, ax=ax, shrink=0.8, label="Spearman correlation", location="right")
+    # cbar = fig.colorbar(im, ax=ax, shrink=0.8, label="Spearman correlation", location="right")
+    cbar = fig.colorbar(im, ax=ax, label="Spearman correlation", location="right")
 
     # Add a legend for the weight colormap, positioned to the right of the Spearman cbar
-
-    # Get the position and size of the main colorbar
-    cbar_ax = cbar.ax
-    fig = cbar_ax.figure
-    cbar_pos = cbar_ax.get_position()
+    fig.tight_layout()
+    cbar_pos = cbar.ax.get_position()
 
     # Calculate bounding box for the weight colorbar to the right of the correlation colorbar
     width = cbar_pos.width / 4  # reduce width by 2/3
-    pad = 0.06  # space between colorbars (fraction of figure)
-    new_x0 = cbar_pos.x1 + pad
-    new_pos = [new_x0, cbar_pos.y0, width, cbar_pos.height]
-    cbar_ax_weights = fig.add_axes(new_pos)
+    # pad = cbar_pos.width * 0.02  # space between colorbars (relative to main cbar width)
+    pad = 0#cbar_pos.width * 0.02  # space between colorbars (relative to main cbar width)
+    cbar_ax_weights = fig.add_axes(
+        [cbar_pos.x1 + pad, cbar_pos.y0, width, cbar_pos.height])
 
     cb_weights = ColorbarBase(
         cbar_ax_weights,
@@ -548,12 +548,15 @@ def plot_2k_grid_joint_corr_weight(name, results_matrix, k_low, k_high, cmap_vma
         orientation="vertical",
         label="Weight"
     )
-    # Make tick labels clean
-    cb_weights.ax.set_yticklabels([f"{w:.2f}" for w in ws], fontsize=7)
-    cb_weights.set_label("k1 weight", fontsize=9, labelpad=10)
+    # Make tick labels clean (every tick, label every other)
+    weight_labels = [f"{w:.1f}" if i % 2 == 0 else "" for i, w in enumerate(ws)]
+    cb_weights.ax.set_yticklabels(weight_labels, fontsize=10)
+    cb_weights.set_label("k1 weight", fontsize=10, labelpad=10)
 
-    # Adjust layout
-    plt.tight_layout()
+    # Re-sync so the weight colorbar matches the main colorbar height exactly
+    cbar_pos = cbar.ax.get_position()
+    cb_weights.ax.set_position(
+        [cbar_pos.x1 + pad, cbar_pos.y0, width, cbar_pos.height])
     plt.show()
 
 
@@ -784,29 +787,29 @@ def plot_3k_grid_corr(name, grid_df, k, s, k_low, k_high, cmap_vmax=None):
         ax.set_yticks(ytick_positions)
         ax.set_yticklabels(ytick_labels, fontsize=tick_label_fontsize)
 
-        # Highlight the best (largest) cell in the plane with a red rectangle or marker,
-        # but only if there is at least one finite value.
-        if np.any(np.isfinite(data)):
-            max_val = np.nanmax(data)
-            ys, xs = np.where(data == max_val)
-            if len(ys) > 0:
-                y, x = ys[0], xs[0]
-                # If this cell is ALSO the global best, color it black. Otherwise, red.
-                if i == global_best_subplot and y == global_best_y and x == global_best_x:
-                    rect = plt.Rectangle((x - 0.5, y - 0.5), 1, 1,
-                                        linewidth=2.5, edgecolor='#000000', facecolor='none')       # #00BFFF for blue
-                    ax.add_patch(rect)
-                # else:
-                    # rect = plt.Rectangle((x - 0.5, y - 0.5), 1, 1,
-                    #                     linewidth=2.5, edgecolor='red', facecolor='none')
-                    # ax.add_patch(rect)
+        ## Highlight the best (largest) cell in the plane with a red rectangle or marker,
+        ## but only if there is at least one finite value.
+        #if np.any(np.isfinite(data)):
+        #    max_val = np.nanmax(data)
+        #    ys, xs = np.where(data == max_val)
+        #    if len(ys) > 0:
+        #        y, x = ys[0], xs[0]
+        #        # If this cell is ALSO the global best, color it black. Otherwise, red.
+        #        if i == global_best_subplot and y == global_best_y and x == global_best_x:
+        #            rect = plt.Rectangle((x - 0.5, y - 0.5), 1, 1,
+        #                                linewidth=2.5, edgecolor='#000000', facecolor='none')       # #00BFFF for blue
+        #            ax.add_patch(rect)
+        #        # else:
+        #            # rect = plt.Rectangle((x - 0.5, y - 0.5), 1, 1,
+        #            #                     linewidth=2.5, edgecolor='red', facecolor='none')
+        #            # ax.add_patch(rect)
 
     # fig.suptitle(f"{name}: Spearman correlation for three k-mers, k={k_low}..{k_high}", fontsize=18)
     fig.suptitle(f"{name}: Spearman correlation for three k-mers, k={k_low}..{k_high}")
 
     # Move the colorbar (legend) more to the left by reducing the pad
     # You can use the ax argument as a list, but use the 'fraction' and 'pad' kwargs to move it left
-    cbar = fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.85, location="right", label="Spearman corr", pad=0.02)
+    cbar = fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.9, location="right", label="Spearman correlation", pad=0.02)
     plt.show()
 
 

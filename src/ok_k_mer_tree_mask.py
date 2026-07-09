@@ -15,6 +15,7 @@ Data expectations (see `ok_k_mer.build_merged_df`):
 """
 
 import os
+import pickle
 
 # ete3 needs a Qt platform; on a headless cluster use the offscreen backend.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -397,6 +398,105 @@ def recommendation_summary(best_corr):
     return {"ks": (k,), "n_ks": 1, "k_eff": float(k), "corr": corr}
 
 
+def _best_corr_ks_weight(best_corr):
+    """Return ``(k1, k2, w)`` from a `best_corr` tuple; NaN for unused fields."""
+    if best_corr is None:
+        return np.nan, np.nan, np.nan
+    if len(best_corr) == 4:
+        k1, k2, w, _ = best_corr
+        return k1, k2, w
+    k, _ = best_corr
+    return k, np.nan, np.nan
+
+
+def _same_ks_and_weight(full_best, masked_best):
+    """True when masked recommendation uses the same k-mer(s) and weight as full."""
+    if full_best is None or masked_best is None:
+        return False
+    fs = recommendation_summary(full_best)
+    ms = recommendation_summary(masked_best)
+    if fs["ks"] != ms["ks"]:
+        return False
+    if len(full_best) == 2:
+        return True
+    return full_best[2] == masked_best[2]
+
+
+def _recommendation_match_row(full_best, masked_best, tol):
+    """Build per-run match features comparing masked vs full recommendations."""
+    fs = recommendation_summary(full_best)
+    ms = recommendation_summary(masked_best)
+    k_eff = ms["k_eff"]
+    k_eff_global = fs["k_eff"]
+    matched_k_eff = (bool(abs(k_eff - k_eff_global) <= tol)
+                     if not np.isnan(k_eff) else False)
+    matched_ks = (bool(ms["ks"] == fs["ks"])
+                  if ms["ks"] is not None and fs["ks"] is not None else False)
+    matched_ks_w = matched_ks and _same_ks_and_weight(full_best, masked_best)
+    k1, k2, w = _best_corr_ks_weight(masked_best)
+    k_eff_dev = k_eff - k_eff_global if not np.isnan(k_eff) else np.nan
+    return {
+        "k_eff": k_eff,
+        "n_ks": ms["n_ks"],
+        "k1": k1,
+        "k2": k2,
+        "w": w,
+        "matched_k_eff": matched_k_eff,
+        "matched_ks": matched_ks,
+        "matched_ks_w": matched_ks_w,
+        "k_eff_dev": k_eff_dev,
+    }
+
+
+class GlobalEffectiveMatchResults(object):
+    """Simulation output for whole-tree effective-match robustness."""
+
+    def __init__(self, runs, full, full_best_corr, meta):
+        self.runs = runs
+        self.full = full
+        self.full_best_corr = full_best_corr
+        self.meta = meta
+
+
+def save_global_effective_match_results(results, path):
+    """Pickle `GlobalEffectiveMatchResults` to `path`."""
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(path, "wb") as f:
+        pickle.dump(results, f)
+
+
+def load_global_effective_match_results(path):
+    """Load `GlobalEffectiveMatchResults` from a pickle written by `save_...`."""
+    with open(path, "rb") as f:
+        return pickle.load(f)
+
+
+def _normalize_effective_match_results(results, tol=None):
+    """Accept dataclass or legacy DataFrame; return (runs_df, full, meta, tol)."""
+    if isinstance(results, GlobalEffectiveMatchResults):
+        df = results.runs
+        full = results.full
+        meta = results.meta
+        if tol is None:
+            tol = meta.get("tol", 1)
+        return df, full, meta, tol
+
+    df = results
+    full = df.attrs.get("full", {})
+    meta = {}
+    if tol is None:
+        tol = 1
+    if "matched_k_eff" not in df.columns and "matched" in df.columns:
+        df = df.copy()
+        df["matched_k_eff"] = df["matched"]
+    if "k_eff_dev" not in df.columns and "k_eff" in df.columns and full:
+        df = df.copy()
+        df["k_eff_dev"] = df["k_eff"] - full.get("k_eff", np.nan)
+    return df, full, meta, tol
+
+
 def node_recommendation_table(tree, node_info):
     """Build a per-node table of recommendation features and node geometry.
 
@@ -487,9 +587,9 @@ def plot_tree_annotated(tree, node_info, name=None, k_low=6, k_high=40,
     Each internal node with a non-``None`` ``best_corr`` gets:
       - a `PieChartFace` of the k weight(s) colored via `k_color` (when
         `show_weight`),
-      - a `CircleFace` colored by ``-corr`` on `YlOrRd` over ``[0, 1]``
-        (correlations are negative; stronger = darker red) (when `show_corr`),
-      - a `TextFace` label summarizing k / w / corr.
+      - a `TextFace` label summarizing k / w (and ``corr`` when `show_corr`).
+        The stored correlation is negative, so it is reported sign-flipped
+        (i.e. ``corr = -stored``) as a positive value.
 
     Args:
         tree: Named tree (from `load_named_tree`).
@@ -497,7 +597,7 @@ def plot_tree_annotated(tree, node_info, name=None, k_low=6, k_high=40,
         name: Optional dataset name for the default output filename.
         k_low, k_high: k range (for the legend colorbar and `k_color`).
         k_color: Optional precomputed ``{k: color}`` dict; built if ``None``.
-        show_corr: Draw the correlation circle.
+        show_corr: Include the (sign-flipped) correlation in the text label.
         show_weight: Draw the k pie chart + text label.
         masked: Optional set of masked genome (leaf) names; masked leaves are
             grayed out in the rendering.
@@ -515,15 +615,11 @@ def plot_tree_annotated(tree, node_info, name=None, k_low=6, k_high=40,
         outpath = f"{name or 'tree'}_tree_annotated.png"
     masked = set() if masked is None else set(masked)
 
-    corr_cmap = plt.cm.YlOrRd
-
     ts = _basic_tree_style(scale=scale)
 
-    # Legends: correlation colorbar + k colorbar.
-    if show_corr:
-        ts.legend.add_face(_corr_colorbar_face(cmap=corr_cmap), column=0)
+    # Legend: k colorbar.
     if show_weight:
-        ts.legend.add_face(_k_colorbar_face(k_color), column=1)
+        ts.legend.add_face(_k_colorbar_face(k_color), column=0)
     ts.legend_position = 3  # bottom-left (1=TL, 2=TR, 3=BL, 4=BR)
 
     def layout(node):
@@ -542,27 +638,22 @@ def plot_tree_annotated(tree, node_info, name=None, k_low=6, k_high=40,
                 k1, k2, w, corr = best
                 colors = [k_color.get(k1, "#808080"), k_color.get(k2, "#808080")]
                 weights = [w * 100, (1 - w) * 100]
-                label = f"k={k1},{k2}\nw={w}\ncorr={round(corr, 3)}"
+                label = f"k={k1},{k2}\nw={w}"
             else:                                  # single k (k, corr) -> w=1.0
                 k, corr = best
                 colors = [k_color.get(k, "#808080")]
                 weights = [100]
-                label = f"k={k}\nw=1.0\ncorr={round(corr, 3)}"
+                label = f"k={k}\nw=1.0"
+
+            # Stored corr is negative; report it sign-flipped as positive.
+            if show_corr:
+                label += f"\ncorr={round(-corr, 3)}"
 
             if show_weight:
                 pie = faces.PieChartFace(weights, colors=colors, width=50, height=50)
                 pie.border.width = None
                 faces.add_face_to_node(pie, node, 0, position="branch-right")
 
-            if show_corr:
-                # Correlations are negative; map -corr in [0, 1] to color
-                # strength (clip guards rare noisy positive-corr subtrees).
-                strength = float(np.clip(-corr, 0.0, 1.0))
-                circle = faces.CircleFace(
-                    radius=25, color=mcolors.rgb2hex(corr_cmap(strength)))
-                faces.add_face_to_node(circle, node, 0, position="branch-right")
-
-            if show_weight:
                 text = faces.TextFace(label, fsize=15)
                 faces.add_face_to_node(text, node, 1, position="branch-bottom")
 
@@ -571,6 +662,86 @@ def plot_tree_annotated(tree, node_info, name=None, k_low=6, k_high=40,
     ts.layout_fn = layout
     _render(tree, outpath, ts, width=width, display=display)
     return outpath
+
+
+def _annotation_matches(best_corr, k1, k2, w, corr, tol_corr=0.002):
+    """True when `best_corr` matches the displayed annotation fields."""
+    if best_corr is None:
+        return False
+    if len(best_corr) == 4:
+        bk1, bk2, bw, bcorr = best_corr
+        if bk1 != k1 or bk2 != k2:
+            return False
+        if w is not None and abs(bw - w) > 1e-9:
+            return False
+        if corr is not None and abs(-bcorr - corr) > tol_corr:
+            return False
+        return True
+    bk, bcorr = best_corr
+    if k2 is not None:
+        return False
+    if bk != k1:
+        return False
+    if w is not None and abs(w - 1.0) > 1e-9:
+        return False
+    if corr is not None and abs(-bcorr - corr) > tol_corr:
+        return False
+    return True
+
+
+def find_node_by_annotation(node_info, k1, k2, w=None, corr=None, tol_corr=0.002):
+    """Return the internal-node name whose annotation matches the given fields.
+
+    Displayed correlations are positive (``corr``); stored values are negative.
+    For two-k recommendations, ``k1`` and ``k2`` are required. For single-k,
+    pass ``k2=None``.
+    """
+    matches = []
+    for name, info in node_info.items():
+        best = info.get("best_corr")
+        if _annotation_matches(best, k1, k2, w, corr, tol_corr=tol_corr):
+            matches.append(name)
+    if not matches:
+        raise ValueError(
+            "No node matches k1={k1}, k2={k2}, w={w}, corr={corr}".format(
+                k1=k1, k2=k2, w=w, corr=corr))
+    if len(matches) > 1:
+        raise ValueError(
+            "Multiple nodes match the annotation ({n}): {names}".format(
+                n=len(matches), names=matches))
+    return matches[0]
+
+
+def subtree_at_node(tree, node_name):
+    """Return a copy of the subtree rooted at `node_name`."""
+    nodes = tree.search_nodes(name=node_name)
+    if not nodes:
+        raise ValueError("Node not found: {0}".format(node_name))
+    return nodes[0].copy()
+
+
+def subset_node_info(node_info, subtree):
+    """Restrict `node_info` to internal nodes present in `subtree`."""
+    names = {node.name for node in subtree.traverse() if not node.is_leaf()}
+    return {name: node_info[name] for name in names if name in node_info}
+
+
+def plot_subtree_annotated(tree, node_info, root_node_name, name=None,
+                           k_low=6, k_high=40, k_color=None, show_corr=True,
+                           show_weight=True, outpath=None, width=1500,
+                           scale=2000, display=True):
+    """Plot only the subtree rooted at `root_node_name` with its annotations."""
+    subtree = subtree_at_node(tree, root_node_name)
+    sub_info = subset_node_info(node_info, subtree)
+    if outpath is None:
+        suffix = root_node_name.replace("internal_node_", "node")
+        outpath = "{base}_subtree_{suffix}_annotated.png".format(
+            base=name or "tree", suffix=suffix)
+    plot_tree_annotated(subtree, sub_info, name=name, k_low=k_low, k_high=k_high,
+                        k_color=k_color, show_corr=show_corr,
+                        show_weight=show_weight, outpath=outpath, width=width,
+                        scale=scale, display=display)
+    return subtree, sub_info, outpath
 
 
 ################################################################################
@@ -747,10 +918,13 @@ def global_effective_match_consistency(tree, merged_df, fracs, n_runs=10,
         tol: ``|k_eff|`` tolerance (k units) for the match flag.
 
     Returns:
-        pd.DataFrame: one row per (frac, run) with columns ``frac, run, k_eff,
-        matched``. ``df.attrs['full']`` holds the full-data summary.
+        GlobalEffectiveMatchResults: ``runs`` has one row per (frac, run) with
+        columns ``frac, run, k_eff, n_ks, k1, k2, w, matched_k_eff,
+        matched_ks, matched_ks_w, k_eff_dev``. ``full`` holds the full-data
+        summary; ``full_best_corr`` is the raw best_corr tuple.
     """
     df = _as_pair_indexed(merged_df)
+    fracs = list(fracs)
     _, _, best_full = _sweep_best_corr(df, k_low, k_high, w_step)
     full = recommendation_summary(best_full)
 
@@ -764,16 +938,25 @@ def global_effective_match_consistency(tree, merged_df, fracs, n_runs=10,
             sub = df[keep]
 
             _, _, best_m = _sweep_best_corr(sub, k_low, k_high, w_step)
-            k_eff = recommendation_summary(best_m)["k_eff"]
-            rows.append({
-                "frac": float(frac), "run": run, "k_eff": k_eff,
-                "matched": bool(abs(k_eff - full["k_eff"]) <= tol)
-                if not np.isnan(k_eff) else False,
-            })
+            row = _recommendation_match_row(best_full, best_m, tol)
+            row.update({"frac": float(frac), "run": run})
+            rows.append(row)
 
-    out = pd.DataFrame(rows)
-    out.attrs["full"] = full
-    return out
+    meta = {
+        "tol": tol,
+        "k_low": k_low,
+        "k_high": k_high,
+        "w_step": w_step,
+        "seed": seed,
+        "fracs": fracs,
+        "n_runs": n_runs,
+    }
+    return GlobalEffectiveMatchResults(
+        runs=pd.DataFrame(rows),
+        full=full,
+        full_best_corr=best_full,
+        meta=meta,
+    )
 
 
 def node_consistency(tree, merged_df, fracs, n_runs=5, k_low=6, k_high=40,
@@ -860,6 +1043,27 @@ def _plot_mean_band(ax, results_df, value, label=None, color="C0"):
         ax.set_ylabel(label)
 
 
+def _plot_frac_scatter(ax, df, y_col, x_jitter=0.012, alpha=0.4, s=12, color="C0"):
+    """Scatter `y_col` vs masking fraction with reproducible x jitter."""
+    x = df["frac"].to_numpy(dtype=float)
+    y = df[y_col].to_numpy(dtype=float)
+    rng = np.random.default_rng(0)
+    x_plot = x + rng.uniform(-x_jitter, x_jitter, size=len(x))
+    ax.scatter(x_plot, y, alpha=alpha, s=s, color=color, edgecolors="none")
+    ax.set_xlabel("masking fraction")
+
+
+def _plot_match_strip(ax, df, value_col, ylabel, color="C0"):
+    """Jittered binary outcomes plus mean match rate per masking fraction."""
+    _plot_frac_scatter(ax, df, value_col, alpha=0.35, s=10, color=color)
+    grp = df.groupby("frac")[value_col]
+    mean = grp.mean()
+    fracs = mean.index.to_numpy(dtype=float)
+    ax.plot(fracs, mean.to_numpy(), marker="o", color=color, linewidth=2, zorder=5)
+    ax.set_ylabel(ylabel)
+    ax.set_ylim(-0.05, 1.05)
+
+
 def plot_global_consistency(results_df, name, display=True):
     """Plot whole-tree robustness metrics vs masking fraction (4 panels)."""
     fig, axes = plt.subplots(1, 4, figsize=(20, 4))
@@ -881,12 +1085,49 @@ def plot_global_consistency(results_df, name, display=True):
     return fig
 
 
-def plot_global_effective_match_consistency(results_df, name, display=True):
-    """Plot only the whole-tree effective-k match rate vs masking fraction."""
-    fig, ax = plt.subplots(1, 1, figsize=(6, 4))
-    _plot_mean_band(ax, results_df, "matched", "effective match rate (+/-1 k)")
-    ax.set_ylim(-0.05, 1.05)
-    fig.suptitle(f"{name}: whole-tree effective-k match rate")
+def plot_global_effective_match_consistency(results, name, display=True, tol=None):
+    """Plot whole-tree recommendation robustness vs masking fraction (2x2)."""
+    df, full, meta, tol = _normalize_effective_match_results(results, tol=tol)
+    k_eff_global = full.get("k_eff", np.nan)
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    ax1, ax2, ax3, ax4 = axes.ravel()
+
+    # Panel 1: per-run k_eff values.
+    _plot_frac_scatter(ax1, df, "k_eff")
+    ax1.axhline(k_eff_global, color="C3", linestyle="--", linewidth=1.5,
+                label=f"global k_eff = {k_eff_global:.2f}")
+    mean = df.groupby("frac")["k_eff"].mean()
+    fracs = mean.index.to_numpy(dtype=float)
+    ax1.plot(fracs, mean.to_numpy(), color="C0", linewidth=1, alpha=0.5, label="mean")
+    ax1.set_ylabel("Recommended effective k (k_eff)")
+    ax1.legend(frameon=False, fontsize=8)
+
+    # Panel 2: exact k-mer(s) and weight match.
+    if "matched_ks_w" in df.columns:
+        _plot_match_strip(ax2, df, "matched_ks_w",
+                          "Match (same k-mer(s) and weight)")
+    else:
+        ax2.text(0.5, 0.5, "Re-run simulation for\nmatched_ks_w data",
+                 ha="center", va="center", transform=ax2.transAxes)
+        ax2.set_xlabel("masking fraction")
+
+    # Panel 3: exact k-mer(s) match (weight may differ).
+    if "matched_ks" in df.columns:
+        _plot_match_strip(ax3, df, "matched_ks",
+                          "Match (same k-mer(s), any weight)", color="C1")
+    else:
+        ax3.text(0.5, 0.5, "Re-run simulation for\nmatched_ks data",
+                 ha="center", va="center", transform=ax3.transAxes)
+        ax3.set_xlabel("masking fraction")
+
+    # Panel 4: deviation from global k_eff baseline.
+    _plot_frac_scatter(ax4, df, "k_eff_dev", color="C2")
+    ax4.axhline(0, color="C3", linestyle="--", linewidth=1.5)
+    ax4.set_ylabel("Δk_eff (masked − global)")
+    ax4.set_title(f"global k_eff = {k_eff_global:.2f}, tol = ±{tol} k", fontsize=9)
+
+    fig.suptitle(f"{name}: whole-tree recommendation robustness")
     fig.tight_layout()
     if display:
         plt.show()
