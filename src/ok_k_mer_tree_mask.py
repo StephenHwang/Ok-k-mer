@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import matplotlib.ticker as mticker
 from scipy.stats import spearmanr, kendalltau
 
 from ete3 import Tree, TreeStyle, NodeStyle, faces
@@ -495,6 +496,16 @@ def _normalize_effective_match_results(results, tol=None):
         df = df.copy()
         df["k_eff_dev"] = df["k_eff"] - full.get("k_eff", np.nan)
     return df, full, meta, tol
+
+
+def _as_global_consistency_df(results):
+    """Return a `global_consistency` runs DataFrame; reject effective-match results."""
+    if isinstance(results, GlobalEffectiveMatchResults):
+        raise TypeError(
+            "plot_global_consistency expects output from global_consistency "
+            "(pd.DataFrame), not GlobalEffectiveMatchResults. "
+            "Use plot_global_effective_match_consistency instead.")
+    return results
 
 
 def node_recommendation_table(tree, node_info):
@@ -1066,6 +1077,7 @@ def _plot_match_strip(ax, df, value_col, ylabel, color="C0"):
 
 def plot_global_consistency(results_df, name, display=True):
     """Plot whole-tree robustness metrics vs masking fraction (4 panels)."""
+    results_df = _as_global_consistency_df(results_df)
     fig, axes = plt.subplots(1, 4, figsize=(20, 4))
     _plot_mean_band(axes[0], results_df, "matched", "match rate (+/-1 k)")
     axes[0].set_ylim(-0.05, 1.05)
@@ -1128,6 +1140,63 @@ def plot_global_effective_match_consistency(results, name, display=True, tol=Non
     ax4.set_title(f"global k_eff = {k_eff_global:.2f}, tol = ±{tol} k", fontsize=9)
 
     fig.suptitle(f"{name}: whole-tree recommendation robustness")
+    fig.tight_layout()
+    if display:
+        plt.show()
+    return fig
+
+
+def plot_effective_length_vs_masking(results_by_name, display=True, show_spread=True,
+                                      ax=None):
+    """Overlay mean effective k vs masking fraction for several datasets.
+
+    Args:
+        results_by_name: Mapping ``{dataset_name: results}`` where each value is
+            a `GlobalEffectiveMatchResults` (or legacy DataFrame) from
+            `global_effective_match_consistency`.
+        display: Show the figure inline.
+        show_spread: Shade mean +/- 1 std of k_eff across runs per fraction.
+        ax: Optional existing axis to draw on.
+
+    Returns:
+        matplotlib.figure.Figure
+    """
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(7, 5))
+    else:
+        fig = ax.figure
+
+    label_overrides = {
+        "Aquificota": "Aquificota",
+        "Bacillales": "Bacillales_A",
+        "Caldisericia": "Caldisericia",
+        "Chlamydia": "Chlamydiales",
+        "Cyano": "Cyanobacteriales",
+        "Neisseriaceae": "Neisseriaceae",
+    }
+
+    color_overrides = {"Cyano": "C2", "Caldisericia": "C4"}
+
+    for i, (name, results) in enumerate(results_by_name.items()):
+        df, _full, _meta, _tol = _normalize_effective_match_results(results)
+        grp = df.groupby("frac")["k_eff"]
+        mean = grp.mean()
+        fracs = mean.index.to_numpy(dtype=float)
+        color = color_overrides.get(name, f"C{i % 10}")
+        ax.plot(fracs, mean.to_numpy(), marker="o", color=color,
+                label=label_overrides.get(name, name))
+        if show_spread:
+            std = grp.std()
+            ax.fill_between(fracs, (mean - std).to_numpy(), (mean + std).to_numpy(),
+                            color=color, alpha=0.15)
+
+    ax.set_xlabel("Masking fraction")
+    ax.set_ylabel("Weighted composite rank")
+    ax.xaxis.set_major_formatter(
+        mticker.FuncFormatter(lambda x, _pos: f"{x * 100:.0f}%"))
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.legend(frameon=False, fontsize=9, loc="upper left", ncol=2)
     fig.tight_layout()
     if display:
         plt.show()
