@@ -93,10 +93,13 @@ def _basic_tree_style(scale=2000, show_leaf_name=True, mode="r"):
     return ts
 
 
-def _render(tree, outpath, tree_style, width=1500, display=True):
+def _render(tree, outpath, tree_style, width=1500, display=True, dpi=None):
     """Render `tree` to `outpath` and optionally show it inline."""
-    tree.render(outpath, tree_style=tree_style, w=width)
-    if display and _HAVE_IPYTHON:
+    if dpi is None:
+        tree.render(outpath, tree_style=tree_style, w=width)
+    else:
+        tree.render(outpath, tree_style=tree_style, w=width, dpi=dpi)
+    if display and _HAVE_IPYTHON and str(outpath).lower().endswith(".png"):
         _ipy_display(Image(filename=outpath))
     return outpath
 
@@ -592,7 +595,7 @@ def kendall_tau_distance(scores_a, scores_b):
 def plot_tree_annotated(tree, node_info, name=None, k_low=6, k_high=40,
                         k_color=None, show_corr=True, show_weight=True,
                         masked=None, outpath=None, width=1500, scale=2000,
-                        display=True):
+                        display=True, dpi=None):
     """Render a tree, annotating internal nodes with their best correlation.
 
     Each internal node with a non-``None`` ``best_corr`` gets:
@@ -671,7 +674,7 @@ def plot_tree_annotated(tree, node_info, name=None, k_low=6, k_high=40,
         node.set_style(nstyle)
 
     ts.layout_fn = layout
-    _render(tree, outpath, ts, width=width, display=display)
+    _render(tree, outpath, ts, width=width, display=display, dpi=dpi)
     return outpath
 
 
