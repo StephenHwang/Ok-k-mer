@@ -122,8 +122,8 @@ def _corr_colorbar_face(cmap=plt.cm.YlOrRd, vmin=0.0, vmax=1.0, tmp_path="colorb
     return face
 
 
-def _k_colorbar_face(k_color, tmp_path="colorbar_k.png"):
-    """Build an ImgFace colorbar for k values from a `k_color` dict."""
+def _k_colorbar_png(k_color, tmp_path="colorbar_k.png"):
+    """Save a horizontal k colorbar (tightly cropped) to `tmp_path`."""
     fig, ax = plt.subplots(figsize=(12, 2))
     ks = sorted(k_color.keys())
     colors = [k_color[k] for k in ks]
@@ -139,10 +139,38 @@ def _k_colorbar_face(k_color, tmp_path="colorbar_k.png"):
     ax.set_visible(False)
     plt.savefig(tmp_path, bbox_inches="tight", pad_inches=0)
     plt.close(fig)
-    face = faces.ImgFace(tmp_path)
+    return tmp_path
+
+
+def _k_colorbar_face(k_color, tmp_path="colorbar_k.png"):
+    """Build an ImgFace colorbar for k values from a `k_color` dict."""
+    face = faces.ImgFace(_k_colorbar_png(k_color, tmp_path))
     face.margin_top = 100
     face.margin_bottom = 100
     return face
+
+
+def _paste_centered_legend(image_path, legend_path, target_frac=0.4, pad=30,
+                           bg=(255, 255, 255, 255), dpi=None):
+    """Paste `legend_path` horizontally centered under the tree in `image_path`.
+
+    ete3's built-in legend is corner-anchored and rescaled, so instead we
+    composite the colorbar onto the rendered PNG for reliable centering/size.
+    ``target_frac`` sets the legend width as a fraction of the image width.
+    """
+    from PIL import Image as _PILImage
+    base = _PILImage.open(image_path).convert("RGBA")
+    leg = _PILImage.open(legend_path).convert("RGBA")
+    target_w = max(1, int(base.width * target_frac))
+    scale = target_w / leg.width
+    leg = leg.resize((target_w, max(1, int(leg.height * scale))),
+                     _PILImage.LANCZOS)
+    canvas = _PILImage.new("RGBA", (base.width, base.height + pad + leg.height), bg)
+    canvas.paste(base, (0, 0), base)
+    canvas.paste(leg, ((base.width - leg.width) // 2, base.height + pad), leg)
+    save_kwargs = {} if dpi is None else {"dpi": (dpi, dpi)}
+    canvas.convert("RGB").save(image_path, **save_kwargs)
+    return image_path
 
 
 ################################################################################
@@ -630,24 +658,34 @@ def plot_tree_annotated(tree, node_info, name=None, k_low=6, k_high=40,
     masked = set() if masked is None else set(masked)
 
     ts = _basic_tree_style(scale=scale)
+    ts.show_scale = False        # entirely remove the branch-length scale bar
+    ts.show_leaf_name = False    # leaf names drawn in layout for a larger font
 
-    # Legend: k colorbar.
-    if show_weight:
+    # Legend: k colorbar. For PNG output it is composited on afterwards so it can
+    # be centered and sized precisely; otherwise fall back to ete3's legend.
+    composite_legend = show_weight and str(outpath).lower().endswith(".png")
+    if show_weight and not composite_legend:
         ts.legend.add_face(_k_colorbar_face(k_color), column=0)
-    ts.legend_position = 3  # bottom-left (1=TL, 2=TR, 3=BL, 4=BR)
+        ts.legend_position = 3  # bottom-left (1=TL, 2=TR, 3=BL, 4=BR)
 
     def layout(node):
         nstyle = NodeStyle()
         nstyle["vt_line_width"] = 2
         nstyle["hz_line_width"] = 2
 
-        if node.is_leaf() and node.name in masked:  # gray out masked genomes
-            nstyle["fgcolor"] = "#cccccc"
-            nstyle["hz_line_color"] = "#cccccc"
-            nstyle["size"] = 4
+        if node.is_leaf():
+            if node.name in masked:  # gray out masked genomes
+                nstyle["fgcolor"] = "#cccccc"
+                nstyle["hz_line_color"] = "#cccccc"
+                nstyle["size"] = 4
+            leaf_color = "#cccccc" if node.name in masked else "black"
+            name_face = faces.AttrFace("name", fsize=13, fgcolor=leaf_color)
+            faces.add_face_to_node(name_face, node, column=0,
+                                   position="branch-right")
 
+        # Skip annotations on small clades (<= 4 descendant genomes).
         best = None if node.is_leaf() else node_info.get(node.name, {}).get("best_corr")
-        if best is not None:
+        if best is not None and len(node.get_leaves()) > 4:
             if len(best) == 4:                     # weighted pair (k1, k2, w, corr)
                 k1, k2, w, corr = best
                 colors = [k_color.get(k1, "#808080"), k_color.get(k2, "#808080")]
@@ -674,7 +712,12 @@ def plot_tree_annotated(tree, node_info, name=None, k_low=6, k_high=40,
         node.set_style(nstyle)
 
     ts.layout_fn = layout
-    _render(tree, outpath, ts, width=width, display=display, dpi=dpi)
+    # Render first (no inline display yet); composite the centered legend, then show.
+    _render(tree, outpath, ts, width=width, display=False, dpi=dpi)
+    if composite_legend:
+        _paste_centered_legend(outpath, _k_colorbar_png(k_color), dpi=dpi)
+    if display and _HAVE_IPYTHON and str(outpath).lower().endswith(".png"):
+        _ipy_display(Image(filename=outpath))
     return outpath
 
 
@@ -743,7 +786,7 @@ def subset_node_info(node_info, subtree):
 def plot_subtree_annotated(tree, node_info, root_node_name, name=None,
                            k_low=6, k_high=40, k_color=None, show_corr=True,
                            show_weight=True, outpath=None, width=1500,
-                           scale=2000, display=True):
+                           scale=2000, display=True, dpi=None):
     """Plot only the subtree rooted at `root_node_name` with its annotations."""
     subtree = subtree_at_node(tree, root_node_name)
     sub_info = subset_node_info(node_info, subtree)
@@ -751,10 +794,12 @@ def plot_subtree_annotated(tree, node_info, root_node_name, name=None,
         suffix = root_node_name.replace("internal_node_", "node")
         outpath = "{base}_subtree_{suffix}_annotated.png".format(
             base=name or "tree", suffix=suffix)
+    if outpath:  # ensure the destination directory exists
+        os.makedirs(os.path.dirname(outpath) or ".", exist_ok=True)
     plot_tree_annotated(subtree, sub_info, name=name, k_low=k_low, k_high=k_high,
                         k_color=k_color, show_corr=show_corr,
                         show_weight=show_weight, outpath=outpath, width=width,
-                        scale=scale, display=display)
+                        scale=scale, display=display, dpi=dpi)
     return subtree, sub_info, outpath
 
 
