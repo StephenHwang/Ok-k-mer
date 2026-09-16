@@ -34,6 +34,19 @@ from plotnine import \
 from plotnine.options import figure_size
 from mizani.formatters import percent_format
 
+
+def _save_figure(fig, savepath, dpi=600):
+    """Save ``fig`` as both a vector PDF and a high-res PNG.
+
+    ``savepath`` is a path without extension; nothing happens if it is None.
+    Parent directories are created as needed.
+    """
+    if savepath is None:
+        return
+    os.makedirs(os.path.dirname(savepath) or ".", exist_ok=True)
+    fig.savefig(f"{savepath}.pdf", bbox_inches="tight")
+    fig.savefig(f"{savepath}.png", dpi=dpi, bbox_inches="tight")
+
 # plotnine theme
 def theme_tufte_func(base_size=19, base_family="sans", rotate=True, figure_size=None):
     ''' Plotnine plotting theme. '''
@@ -272,8 +285,12 @@ def initial_corr(merged_df, iteration=0, k_low=5, k_high=32):
     return results_matrix, (int(results_matrix[min_idx][0]), *results_matrix[min_idx][1:3])
 
 # Plot single best k-mer length
-def plot_1k_colorbar_corr(name, df, k_low=6, k_high=40, cmap_vmax=None):
-    """Plot a single heatmap row with one colorbar for k-mer correlations."""
+def plot_1k_colorbar_corr(name, df, k_low=6, k_high=40, cmap_vmax=None, savepath=None, show_title=True):
+    """Plot a single heatmap row with one colorbar for k-mer correlations.
+
+    If ``savepath`` is given (a path without extension), the figure is saved as
+    both ``{savepath}.pdf`` and a 600-dpi ``{savepath}.png``.
+    """
     arr = np.asarray(df)
     k_vals = arr[:, 0].astype(int)
     corr_vals = arr[:, 1].astype(float)
@@ -310,7 +327,9 @@ def plot_1k_colorbar_corr(name, df, k_low=6, k_high=40, cmap_vmax=None):
     ax.set_yticks([])
     ax.set_ylabel("")
     ax.set_xlabel("k-mer length")
-    ax.set_title(f"{name}: Spearman correlation for one k-mer, k={k_low}..{k_high}")
+    if show_title:
+        display_name = {"Chlamydia": "Chlamydiales"}.get(name, name)
+        ax.set_title(f"{display_name}: Spearman correlation for one k-mer")
 
     # Draw a black edge around every location where the correlation is maximal (including ties)
     max_corr = np.nanmax(corr_vals)
@@ -326,7 +345,8 @@ def plot_1k_colorbar_corr(name, df, k_low=6, k_high=40, cmap_vmax=None):
     #     )
     #     ax.add_patch(rect)
 
-    fig.colorbar(im, ax=ax, label="Spearman correlation")
+    fig.colorbar(im, ax=ax, label=r"Spearman correlation, $\rho$")
+    _save_figure(fig, savepath)
     plt.show()
 
 ################################################################################
@@ -407,7 +427,7 @@ def plot_2k_grid_corr(name, results_matrix, k_low, k_high, cmap_vmax=None):
         y, x = min_indices[0][0], min_indices[1][0]
         ax.add_patch(plt.Rectangle((x-0.5, y-0.5), 1, 1, fill=False, edgecolor='black', lw=2.5))
 
-    cbar = fig.colorbar(im, ax=ax, shrink=0.8, label="Spearman correlation")
+    cbar = fig.colorbar(im, ax=ax, shrink=0.8, label=r"Spearman correlation, $\rho$")
     plt.tight_layout()
     plt.show()
 
@@ -449,13 +469,19 @@ def plot_2k_grid_weights(name, results_matrix, k_low, k_high, w_low=0, w_high=1,
 
 
 
-def plot_2k_grid_joint_corr_weight(name, results_matrix, k_low, k_high, cmap_vmax=None, w_low=0, w_high=1, w_step=0.05):
+def plot_2k_grid_joint_corr_weight(name, results_matrix, k_low, k_high, cmap_vmax=None, w_low=0, w_high=1, w_step=0.05, weights="half", savepath=None, show_title=True):
     """
     Plot a 2D heatmap using only the first two dimensions (k1, k2) of results_matrix.
     Averages (or finds the min/max) over the remaining dimension (e.g., ws).
     Spearman correlation strength is shown; the axes cover all ks in the range.
-    In the lower right triangle, overlay weights (following cmap_weight colors) as circles.
+    Overlay weights (following cmap_weight colors) as circles, controlled by
+    ``weights``:
+      - ``"full"``: draw a weight circle over every cell.
+      - ``"half"`` (default): only the lower right triangle (k2 > k1).
+      - ``"none"``: no weight circles (and no weight colorbar).
     """
+    if weights not in ("full", "half", "none"):
+        raise ValueError("weights must be one of 'full', 'half', 'none'")
     # Get argmax weight indexes and their weight values (for overlay)
     indexes = np.nanargmax(results_matrix, axis=2)  # shape [k1, k2]
     ws = np.round(np.arange(w_low, w_high + w_step, w_step), 3)
@@ -489,24 +515,28 @@ def plot_2k_grid_joint_corr_weight(name, results_matrix, k_low, k_high, cmap_vma
     cmap_weight = plt.get_cmap("Greys", len(ws))
     boundaries = np.arange(w_low, w_high + w_step, w_step)
     norm_weight = mcolors.BoundaryNorm(boundaries, cmap_weight.N, clip=True)
-    # Overlay circles for weights in the lower right triangle (k2 > k1)
-    for k1_idx in range(n_ks):
-        for k2_idx in range(n_ks):
-            if k2_idx > k1_idx:  # Lower right triangle (above main diagonal)
-                weight = weight_matrix[k1_idx, k2_idx]
-                # Find closest color in cmap_weight
-                # Use norm_weight to get color
-                color = cmap_weight(norm_weight(weight))
-                # Add a circle inscribed in the square cell
-                center = (k2_idx, k1_idx)
-                radius = 0.40  # fill cell but leave border (radius < 0.5)
-                circle = plt.Circle(center, radius, color=color, alpha=1.0, ec='k', lw=0.5)
-                ax.add_patch(circle)
+    # Overlay circles for weights, per the `weights` option: "full" over every
+    # cell, "half" only the lower right triangle (k2 > k1), "none" skips them.
+    if weights != "none":
+        for k1_idx in range(n_ks):
+            for k2_idx in range(n_ks):
+                if weights == "full" or k2_idx > k1_idx:
+                    weight = weight_matrix[k1_idx, k2_idx]
+                    # Find closest color in cmap_weight
+                    # Use norm_weight to get color
+                    color = cmap_weight(norm_weight(weight))
+                    # Add a circle inscribed in the square cell
+                    center = (k2_idx, k1_idx)
+                    radius = 0.40  # fill cell but leave border (radius < 0.5)
+                    circle = plt.Circle(center, radius, color=color, alpha=1.0, ec='k', lw=0.5)
+                    ax.add_patch(circle)
 
     # Label axes as k1 (y), k2 (x):
-    ax.set_xlabel("k2")
-    ax.set_ylabel("k1")
-    ax.set_title(f"{name}: Spearman correlation for two k-mers, k={k_low}..{k_high}")
+    ax.set_xlabel("$k_2$")
+    ax.set_ylabel("$k_1$")
+    if show_title:
+        display_name = {"Chlamydia": "Chlamydiales"}.get(name, name)
+        ax.set_title(f"{display_name}: Spearman correlation for two k-mers")
 
     xticks = yticks = list(range(n_ks))
     ax.set_xticks(xticks)
@@ -524,39 +554,55 @@ def plot_2k_grid_joint_corr_weight(name, results_matrix, k_low, k_high, cmap_vma
     #    ax.add_patch(plt.Rectangle((x-0.5, y-0.5), 1, 1, fill=False, edgecolor='black', lw=2.5))
 
     # Main heatmap colorbar (Spearman correlation)
-    # cbar = fig.colorbar(im, ax=ax, shrink=0.8, label="Spearman correlation", location="right")
-    cbar = fig.colorbar(im, ax=ax, label="Spearman correlation", location="right")
+    # cbar = fig.colorbar(im, ax=ax, shrink=0.8, label=r"Spearman correlation, $\rho$", location="right")
+    cbar = fig.colorbar(im, ax=ax, label=r"Spearman correlation, $\rho$", location="right")
 
-    # Add a legend for the weight colormap, positioned to the right of the Spearman cbar
+    # Lay out the heatmap + main colorbar identically in all cases.
     fig.tight_layout()
-    cbar_pos = cbar.ax.get_position()
 
-    # Calculate bounding box for the weight colorbar to the right of the correlation colorbar
-    width = cbar_pos.width / 4  # reduce width by 2/3
-    # pad = cbar_pos.width * 0.02  # space between colorbars (relative to main cbar width)
-    pad = 0#cbar_pos.width * 0.02  # space between colorbars (relative to main cbar width)
-    cbar_ax_weights = fig.add_axes(
-        [cbar_pos.x1 + pad, cbar_pos.y0, width, cbar_pos.height])
+    if weights != "none":
+        # Keep the heatmap and main colorbar at a constant absolute (inch) size
+        # regardless of the weight legend: capture their geometry, then widen the
+        # figure purely on the right to make room for the weight colorbar/label.
+        base_w, fig_h = fig.get_size_inches()
+        ax_pos = ax.get_position()
+        cbar_pos = cbar.ax.get_position()
+        ax_in = [ax_pos.x0 * base_w, ax_pos.y0 * fig_h,
+                 ax_pos.width * base_w, ax_pos.height * fig_h]
+        cb_in = [cbar_pos.x0 * base_w, cbar_pos.y0 * fig_h,
+                 cbar_pos.width * base_w, cbar_pos.height * fig_h]
 
-    cb_weights = ColorbarBase(
-        cbar_ax_weights,
-        cmap=cmap_weight,
-        norm=norm_weight,
-        boundaries=boundaries,
-        ticks=ws,
-        spacing='proportional',
-        orientation="vertical",
-        label="Weight"
-    )
-    # Make tick labels clean (every tick, label every other)
-    weight_labels = [f"{w:.1f}" if i % 2 == 0 else "" for i, w in enumerate(ws)]
-    cb_weights.ax.set_yticklabels(weight_labels, fontsize=10)
-    cb_weights.set_label("k1 weight", fontsize=10, labelpad=10)
+        legend_extra = 1.5  # inches added to the right for the weight legend
+        fig_w = base_w + legend_extra
+        fig.set_size_inches(fig_w, fig_h)
 
-    # Re-sync so the weight colorbar matches the main colorbar height exactly
-    cbar_pos = cbar.ax.get_position()
-    cb_weights.ax.set_position(
-        [cbar_pos.x1 + pad, cbar_pos.y0, width, cbar_pos.height])
+        # Restore heatmap + main colorbar to their original absolute sizes.
+        ax.set_position([ax_in[0] / fig_w, ax_in[1] / fig_h,
+                         ax_in[2] / fig_w, ax_in[3] / fig_h])
+        cbar.ax.set_position([cb_in[0] / fig_w, cb_in[1] / fig_h,
+                              cb_in[2] / fig_w, cb_in[3] / fig_h])
+
+        # Weight colorbar, flush to the right of the correlation colorbar.
+        width_in = cb_in[2] / 4  # reduce width by 3/4
+        wx_in = cb_in[0] + cb_in[2]  # pad = 0
+        cbar_ax_weights = fig.add_axes(
+            [wx_in / fig_w, cb_in[1] / fig_h, width_in / fig_w, cb_in[3] / fig_h])
+
+        cb_weights = ColorbarBase(
+            cbar_ax_weights,
+            cmap=cmap_weight,
+            norm=norm_weight,
+            boundaries=boundaries,
+            ticks=ws,
+            spacing='proportional',
+            orientation="vertical",
+            label="Weight"
+        )
+        # Make tick labels clean (every tick, label every other)
+        weight_labels = [f"{w:.1f}" if i % 2 == 0 else "" for i, w in enumerate(ws)]
+        cb_weights.ax.set_yticklabels(weight_labels, fontsize=10)
+        cb_weights.set_label("$k_1$ weight", fontsize=10, labelpad=10)
+    _save_figure(fig, savepath)
     plt.show()
 
 
@@ -676,10 +722,11 @@ def plot_3k_grid_joint_corr_weight(name, grid_df, k, s, k_low, k_high, cmap_vmax
                     #                     linewidth=2.5, edgecolor='red', facecolor='none')
                     # ax.add_patch(rect)
 
-    # fig.suptitle(f"{name}: Spearman correlation for three k-mers, k={k_low}..{k_high}", fontsize=18)
-    fig.suptitle(f"{name}: Spearman correlation for three k-mers, k={k_low}..{k_high}")
+    display_name = {"Chlamydia": "Chlamydiales"}.get(name, name)
+    # fig.suptitle(f"{display_name}: Spearman correlation for three k-mers", fontsize=18)
+    fig.suptitle(f"{display_name}: Spearman correlation for three k-mers")
 
-    cbar = fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.85, location="right", label="Spearman correlation", pad=0.02)
+    cbar = fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.85, location="right", label=r"Spearman correlation, $\rho$", pad=0.02)
 
     cbar_ax = cbar.ax
     fig = cbar_ax.figure
@@ -711,7 +758,7 @@ def plot_3k_grid_joint_corr_weight(name, grid_df, k, s, k_low, k_high, cmap_vmax
 
 ################################################################################
 
-def plot_3k_grid_corr(name, grid_df, k, s, k_low, k_high, cmap_vmax=None):
+def plot_3k_grid_corr(name, grid_df, k, s, k_low, k_high, cmap_vmax=None, savepath=None, show_title=True):
     """
     Plot one heatmap per k1 in [k−s, …, k+s] (each 35×35, k2 × k3);
     collapse weight dims by min Spearman (matches grid objective), then negate
@@ -777,9 +824,9 @@ def plot_3k_grid_corr(name, grid_df, k, s, k_low, k_high, cmap_vmax=None):
                            vmin=0,
                            cmap="YlOrRd")
 
-        ax.set_xlabel("k3")
-        ax.set_ylabel("k2")
-        ax.set_title(f"k1={k_subplot_labels[i]}")
+        ax.set_xlabel("$k_3$")
+        ax.set_ylabel("$k_2$")
+        ax.set_title(f"$k_1$={k_subplot_labels[i]}")
 
         # Set x/y ticks and labels at every other tick, use smaller font
         ax.set_xticks(xtick_positions)
@@ -804,12 +851,15 @@ def plot_3k_grid_corr(name, grid_df, k, s, k_low, k_high, cmap_vmax=None):
         #            #                     linewidth=2.5, edgecolor='red', facecolor='none')
         #            # ax.add_patch(rect)
 
-    # fig.suptitle(f"{name}: Spearman correlation for three k-mers, k={k_low}..{k_high}", fontsize=18)
-    fig.suptitle(f"{name}: Spearman correlation for three k-mers, k={k_low}..{k_high}")
+    if show_title:
+        display_name = {"Chlamydia": "Chlamydiales"}.get(name, name)
+        # fig.suptitle(f"{display_name}: Spearman correlation for three k-mers", fontsize=18)
+        fig.suptitle(f"{display_name}: Spearman correlation for three k-mers")
 
     # Move the colorbar (legend) more to the left by reducing the pad
     # You can use the ax argument as a list, but use the 'fraction' and 'pad' kwargs to move it left
-    cbar = fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.9, location="right", label="Spearman correlation", pad=0.02)
+    cbar = fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.9, location="right", label=r"Spearman correlation, $\rho$", pad=0.02)
+    _save_figure(fig, savepath)
     plt.show()
 
 
