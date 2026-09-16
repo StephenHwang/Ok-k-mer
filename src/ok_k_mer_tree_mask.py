@@ -1199,6 +1199,7 @@ def plot_effective_length_vs_masking(results_by_name, display=True, show_spread=
         mticker.FuncFormatter(lambda x, _pos: f"{x * 100:.0f}%"))
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
+    ax.tick_params(direction="in")
     ax.legend(frameon=False, fontsize=9, loc="upper left", ncol=2)
     fig.tight_layout()
     if display:
