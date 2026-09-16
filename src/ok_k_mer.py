@@ -298,7 +298,15 @@ def plot_1k_colorbar_corr(name, df, k_low=6, k_high=40, cmap_vmax=None, savepath
     k_vals = k_vals[keep]
     corr_vals = corr_vals[keep]
     heatmap = corr_vals[np.newaxis, :]  # shape (1, n_k)
-    fig, ax = plt.subplots(1, 1, figsize=(5,5), constrained_layout=True) # square heatmap plot
+
+    # Size the colored heatmap area to match the two-k-mer heatmap's colored area
+    # (see plot_2k_grid_joint_corr_weight): a square ~5.2732 x 5.2732 inches in an
+    # 8x6 figure. Fixed positioning keeps this constant regardless of title.
+    fig_w, fig_h = 8.0, 6.0
+    heat_in = 5.2732
+    left_in, bottom_in = 1.0626, 0.5768
+    fig = plt.figure(figsize=(fig_w, fig_h))
+    ax = fig.add_axes([left_in / fig_w, bottom_in / fig_h, heat_in / fig_w, heat_in / fig_h])
 
     if cmap_vmax:
         cmap_shared, vmax = cmap_vmax
@@ -323,13 +331,13 @@ def plot_1k_colorbar_corr(name, df, k_low=6, k_high=40, cmap_vmax=None, savepath
     xtick_pos = np.arange(len(k_vals))
     ax.set_xticks(xtick_pos)
     xtick_labels = [str(k) if i % 2 == 0 else "" for i, k in enumerate(k_vals)]
-    ax.set_xticklabels(xtick_labels, fontsize=8)
+    ax.set_xticklabels(xtick_labels, fontsize=13)
     ax.set_yticks([])
     ax.set_ylabel("")
-    ax.set_xlabel("k-mer length")
+    ax.set_xlabel("$k_1$", fontsize=17)
     if show_title:
         display_name = {"Chlamydia": "Chlamydiales"}.get(name, name)
-        ax.set_title(f"{display_name}: Spearman correlation for one k-mer")
+        ax.set_title(f"{display_name}: Spearman correlation for one k-mer", fontsize=19)
 
     # Draw a black edge around every location where the correlation is maximal (including ties)
     max_corr = np.nanmax(corr_vals)
@@ -345,7 +353,12 @@ def plot_1k_colorbar_corr(name, df, k_low=6, k_high=40, cmap_vmax=None, savepath
     #     )
     #     ax.add_patch(rect)
 
-    fig.colorbar(im, ax=ax, label=r"Spearman correlation, $\rho$")
+    # Dedicated colorbar axes so the heatmap keeps its fixed size.
+    cax = fig.add_axes([(left_in + heat_in + 0.15) / fig_w, bottom_in / fig_h,
+                        0.2 / fig_w, heat_in / fig_h])
+    cbar = fig.colorbar(im, cax=cax, label=r"Spearman correlation, $\rho$")
+    cbar.ax.tick_params(labelsize=13)
+    cbar.set_label(r"Spearman correlation, $\rho$", fontsize=16)
     _save_figure(fig, savepath)
     plt.show()
 
@@ -532,18 +545,18 @@ def plot_2k_grid_joint_corr_weight(name, results_matrix, k_low, k_high, cmap_vma
                     ax.add_patch(circle)
 
     # Label axes as k1 (y), k2 (x):
-    ax.set_xlabel("$k_2$")
-    ax.set_ylabel("$k_1$")
+    ax.set_xlabel("$k_2$", fontsize=17)
+    ax.set_ylabel("$k_1$", fontsize=17)
     if show_title:
         display_name = {"Chlamydia": "Chlamydiales"}.get(name, name)
-        ax.set_title(f"{display_name}: Spearman correlation for two k-mers")
+        ax.set_title(f"{display_name}: Spearman correlation for two k-mers", fontsize=19)
 
     xticks = yticks = list(range(n_ks))
     ax.set_xticks(xticks)
     xlabels = [str(k) if i % 2 == 0 else "" for i, k in enumerate(ks)]
-    ax.set_xticklabels(xlabels, fontsize=8)
+    ax.set_xticklabels(xlabels, fontsize=13)
     ax.set_yticks(yticks)
-    ax.set_yticklabels(xlabels, fontsize=8)
+    ax.set_yticklabels(xlabels, fontsize=13)
 
     ## Optional: mark the globally max (best) cell
     #max_val = np.nanmax(aggregate_matrix[np.isfinite(aggregate_matrix)])
@@ -556,6 +569,8 @@ def plot_2k_grid_joint_corr_weight(name, results_matrix, k_low, k_high, cmap_vma
     # Main heatmap colorbar (Spearman correlation)
     # cbar = fig.colorbar(im, ax=ax, shrink=0.8, label=r"Spearman correlation, $\rho$", location="right")
     cbar = fig.colorbar(im, ax=ax, label=r"Spearman correlation, $\rho$", location="right")
+    cbar.ax.tick_params(labelsize=13)
+    cbar.set_label(r"Spearman correlation, $\rho$", fontsize=16)
 
     # Lay out the heatmap + main colorbar identically in all cases.
     fig.tight_layout()
@@ -600,8 +615,8 @@ def plot_2k_grid_joint_corr_weight(name, results_matrix, k_low, k_high, cmap_vma
         )
         # Make tick labels clean (every tick, label every other)
         weight_labels = [f"{w:.1f}" if i % 2 == 0 else "" for i, w in enumerate(ws)]
-        cb_weights.ax.set_yticklabels(weight_labels, fontsize=10)
-        cb_weights.set_label("$k_1$ weight", fontsize=10, labelpad=10)
+        cb_weights.ax.set_yticklabels(weight_labels, fontsize=13)
+        cb_weights.set_label("$k_1$ weight", fontsize=16, labelpad=10)
     _save_figure(fig, savepath)
     plt.show()
 
@@ -666,7 +681,7 @@ def plot_3k_grid_joint_corr_weight(name, grid_df, k, s, k_low, k_high, cmap_vmax
         global_best_subplot = global_best_y = global_best_x = None
 
     im = None
-    tick_label_fontsize = 8  # Make tick labels smaller
+    tick_label_fontsize = 13  # Make tick labels bigger
     for i, ax in enumerate(axes):
         data = planes[i]
 
@@ -789,8 +804,9 @@ def plot_3k_grid_corr(name, grid_df, k, s, k_low, k_high, cmap_vmax=None, savepa
     n_labels = len(k_axis_labels)
     xtick_positions = [i for i in range(n_labels) if i % 2 == 0]  # every other tick
     ytick_positions = [i for i in range(n_labels) if i % 2 == 0]
-    xtick_labels = [k_axis_labels[i] for i in xtick_positions]
-    ytick_labels = [k_axis_labels[i] for i in ytick_positions]
+    # Keep every tick mark, but only label every other one (6, 10, 14, ...)
+    xtick_labels = [k_axis_labels[i] if j % 2 == 0 else "" for j, i in enumerate(xtick_positions)]
+    ytick_labels = [k_axis_labels[i] if j % 2 == 0 else "" for j, i in enumerate(ytick_positions)]
 
     # Overall best cell across all planes (largest after negation)
     global_max = np.nanmax(planes)
@@ -803,7 +819,7 @@ def plot_3k_grid_corr(name, grid_df, k, s, k_low, k_high, cmap_vmax=None, savepa
         global_best_subplot = global_best_y = global_best_x = None
 
     im = None
-    tick_label_fontsize = 8  # Make tick labels smaller
+    tick_label_fontsize = 13  # Make tick labels bigger
     for i, ax in enumerate(axes):
         data = planes[i]
 
@@ -824,9 +840,9 @@ def plot_3k_grid_corr(name, grid_df, k, s, k_low, k_high, cmap_vmax=None, savepa
                            vmin=0,
                            cmap="YlOrRd")
 
-        ax.set_xlabel("$k_3$")
-        ax.set_ylabel("$k_2$")
-        ax.set_title(f"$k_1$={k_subplot_labels[i]}")
+        ax.set_xlabel("$k_3$", fontsize=17)
+        ax.set_ylabel("$k_2$", fontsize=17)
+        ax.set_title(f"$k_1$={k_subplot_labels[i]}", fontsize=17)
 
         # Set x/y ticks and labels at every other tick, use smaller font
         ax.set_xticks(xtick_positions)
@@ -854,11 +870,13 @@ def plot_3k_grid_corr(name, grid_df, k, s, k_low, k_high, cmap_vmax=None, savepa
     if show_title:
         display_name = {"Chlamydia": "Chlamydiales"}.get(name, name)
         # fig.suptitle(f"{display_name}: Spearman correlation for three k-mers", fontsize=18)
-        fig.suptitle(f"{display_name}: Spearman correlation for three k-mers")
+        fig.suptitle(f"{display_name}: Spearman correlation for three k-mers", fontsize=20)
 
     # Move the colorbar (legend) more to the left by reducing the pad
     # You can use the ax argument as a list, but use the 'fraction' and 'pad' kwargs to move it left
     cbar = fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.9, location="right", label=r"Spearman correlation, $\rho$", pad=0.02)
+    cbar.ax.tick_params(labelsize=13)
+    cbar.set_label(r"Spearman correlation, $\rho$", fontsize=16)
     _save_figure(fig, savepath)
     plt.show()
 
