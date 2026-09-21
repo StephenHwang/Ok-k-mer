@@ -32,6 +32,12 @@ from scipy.stats import spearmanr, kendalltau
 from ete3 import Tree, TreeStyle, NodeStyle, faces
 
 try:
+    from numba import njit, prange
+    _HAVE_NUMBA = True
+except Exception:  # pragma: no cover
+    _HAVE_NUMBA = False
+
+try:
     from IPython.display import Image, display as _ipy_display
     _HAVE_IPYTHON = True
 except Exception:  # pragma: no cover - IPython not always available
@@ -310,6 +316,158 @@ def _sweep_best_corr(sub_df, k_low=6, k_high=40, w_step=0.05):
     return local_minima, weighted_minima, best_corr
 
 
+def _positive_simplex_weights(n_parts, w_step=0.05):
+    """Positive weights on the simplex as multiples of `w_step` summing to 1."""
+    ws = [round(float(w), 2) for w in np.arange(w_step, 1.0, w_step)]
+    if n_parts == 2:
+        return np.asarray(ws, dtype=np.float64)
+    triples = []
+    for w1 in ws:
+        for w2 in ws:
+            w3 = round(1.0 - w1 - w2, 2)
+            if w3 >= w_step - 1e-9 and abs(w1 + w2 + w3 - 1.0) < 1e-6:
+                triples.append((w1, w2, w3))
+    return np.asarray(triples, dtype=np.float64)
+
+
+if _HAVE_NUMBA:
+    @njit(cache=True)
+    def _fast_spearman_numba(values, t_centered, t_norm, rank_ss):
+        n = values.shape[0]
+        order = np.argsort(values)
+        mean = 0.5 * (n - 1)
+        num = 0.0
+        for i in range(n):
+            num += (i - mean) * t_centered[order[i]]
+        denom = np.sqrt(rank_ss) * t_norm
+        if denom == 0.0:
+            return np.nan
+        return num / denom
+
+    @njit(parallel=True, cache=True)
+    def _best_3k_numba(ranks, t_centered, t_norm, ks, triple_w):
+        n_k, n = ranks.shape
+        mean = 0.5 * (n - 1)
+        rank_ss = 0.0
+        for i in range(n):
+            x = i - mean
+            rank_ss += x * x
+
+        loc_c = np.full(n_k, np.inf)
+        loc_k2 = np.empty(n_k, dtype=np.float64)
+        loc_k3 = np.empty(n_k, dtype=np.float64)
+        loc_w1 = np.empty(n_k, dtype=np.float64)
+        loc_w2 = np.empty(n_k, dtype=np.float64)
+        loc_w3 = np.empty(n_k, dtype=np.float64)
+
+        for i in prange(n_k):
+            mixed = np.empty(n, dtype=np.float64)
+            best_c = np.inf
+            k2_b = np.nan
+            k3_b = np.nan
+            w1_b = np.nan
+            w2_b = np.nan
+            w3_b = np.nan
+            for j in range(i + 1, n_k):
+                for m in range(j + 1, n_k):
+                    for ti in range(triple_w.shape[0]):
+                        w1 = triple_w[ti, 0]
+                        w2 = triple_w[ti, 1]
+                        w3 = triple_w[ti, 2]
+                        for p in range(n):
+                            mixed[p] = (w1 * ranks[i, p]
+                                        + w2 * ranks[j, p]
+                                        + w3 * ranks[m, p])
+                        c = _fast_spearman_numba(mixed, t_centered, t_norm, rank_ss)
+                        if not np.isnan(c) and c < best_c:
+                            best_c = c
+                            k2_b = ks[j]
+                            k3_b = ks[m]
+                            w1_b = w1
+                            w2_b = w2
+                            w3_b = w3
+            loc_c[i] = best_c
+            loc_k2[i] = k2_b
+            loc_k3[i] = k3_b
+            loc_w1[i] = w1_b
+            loc_w2[i] = w2_b
+            loc_w3[i] = w3_b
+
+        ib = 0
+        best_corr = loc_c[0]
+        for i in range(1, n_k):
+            if loc_c[i] < best_corr:
+                best_corr = loc_c[i]
+                ib = i
+        return (ks[ib], loc_k2[ib], loc_k3[ib],
+                loc_w1[ib], loc_w2[ib], loc_w3[ib], best_corr)
+
+
+def _best_3k_python(ranks, t_centered, t_norm, ks, triple_w):
+    """Python fallback for `_best_3k_numba`."""
+    n_k, n = ranks.shape
+    mean = 0.5 * (n - 1)
+    rank_ss = float(np.sum((np.arange(n) - mean) ** 2))
+    best_corr = np.inf
+    best = (np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.inf)
+
+    def score(mixed):
+        order = mixed.argsort()
+        num = float(np.dot(np.arange(n) - mean, t_centered[order]))
+        denom = np.sqrt(rank_ss) * t_norm
+        return np.nan if denom == 0 else num / denom
+
+    for i in range(n_k):
+        for j in range(i + 1, n_k):
+            for m in range(j + 1, n_k):
+                for w1, w2, w3 in triple_w:
+                    c = score(w1 * ranks[i] + w2 * ranks[j] + w3 * ranks[m])
+                    if not np.isnan(c) and c < best_corr:
+                        best_corr = c
+                        best = (ks[i], ks[j], ks[m], w1, w2, w3, c)
+    return best
+
+
+def _sweep_best_corr_global(sub_df, k_low=6, k_high=40, w_step=0.05):
+    """Exhaustive best correlation over 1, 2, and 3 k-mers.
+
+    Same objective as `_sweep_best_corr` (single k and every weighted pair),
+    plus every distinct triple of ks in ``[k_low, k_high]`` with positive
+    simplex weights (step `w_step`). ``best_corr`` is a ``(k, corr)``,
+    ``(k1, k2, w, corr)``, or ``(k1, k2, k3, w1, w2, w3, corr)`` tuple.
+    """
+    local_minima, weighted_minima, best_corr = _sweep_best_corr(
+        sub_df, k_low=k_low, k_high=k_high, w_step=w_step)
+    if best_corr is None or len(sub_df) < 3:
+        return local_minima, weighted_minima, best_corr
+
+    ks = np.array([k for k in range(k_low, k_high + 1)
+                   if f"k{k}_distance" in sub_df.columns], dtype=np.int64)
+    if ks.size < 3:
+        return local_minima, weighted_minima, best_corr
+
+    ranks = np.empty((ks.size, len(sub_df)), dtype=np.float64)
+    for i, k in enumerate(ks):
+        ranks[i] = sub_df[f"k{k}_distance"].rank().to_numpy(dtype=np.float64)
+
+    t_centered = sub_df["tree_distance"].rank().to_numpy(dtype=np.float64)
+    t_centered = t_centered - t_centered.mean()
+    t_norm = float(np.sqrt((t_centered ** 2).sum()))
+    triple_w = _positive_simplex_weights(3, w_step)
+
+    if _HAVE_NUMBA:
+        k1_b, k2_b, k3_b, w1_b, w2_b, w3_b, best_c = _best_3k_numba(
+            ranks, t_centered, t_norm, ks, triple_w)
+    else:
+        k1_b, k2_b, k3_b, w1_b, w2_b, w3_b, best_c = _best_3k_python(
+            ranks, t_centered, t_norm, ks, triple_w)
+
+    if (not np.isnan(best_c)) and best_c < best_corr[-1]:
+        best_corr = (int(k1_b), int(k2_b), int(k3_b),
+                     float(w1_b), float(w2_b), float(w3_b), float(best_c))
+    return local_minima, weighted_minima, best_corr
+
+
 def compute_node_annotations(tree, merged_df, k_low=6, k_high=40, w_step=0.05,
                              masked=None):
     """Sweep correlations for every internal node of `tree`.
@@ -412,16 +570,20 @@ def recommendation_summary(best_corr):
     """Summarize a node's `best_corr` into scalar recommendation features.
 
     Args:
-        best_corr: ``None``, a ``(k, corr)`` single-k tuple, or a
-            ``(k1, k2, w, corr)`` weighted-pair tuple.
+        best_corr: ``None``, a ``(k, corr)`` single-k tuple, a
+            ``(k1, k2, w, corr)`` weighted-pair tuple, or a
+            ``(k1, k2, k3, w1, w2, w3, corr)`` weighted-triple tuple.
 
     Returns:
         dict: ``{ks, n_ks, k_eff, corr}``. ``k_eff`` is the weighted effective
-        k (``w*k1 + (1-w)*k2`` for a pair, ``k`` for a single k). All values are
-        ``None`` / ``nan`` when ``best_corr`` is ``None``.
+        k. All values are ``None`` / ``nan`` when ``best_corr`` is ``None``.
     """
     if best_corr is None:
         return {"ks": None, "n_ks": 0, "k_eff": np.nan, "corr": np.nan}
+    if len(best_corr) == 7:
+        k1, k2, k3, w1, w2, w3, corr = best_corr
+        return {"ks": (k1, k2, k3), "n_ks": 3,
+                "k_eff": w1 * k1 + w2 * k2 + w3 * k3, "corr": corr}
     if len(best_corr) == 4:
         k1, k2, w, corr = best_corr
         return {"ks": (k1, k2), "n_ks": 2,
@@ -441,17 +603,37 @@ def _best_corr_ks_weight(best_corr):
     return k, np.nan, np.nan
 
 
+def _recommendation_ks_weights(best_corr):
+    """Return ``(k1, k2, k3, w, w1, w2, w3)``; unused fields are NaN."""
+    nan = np.nan
+    if best_corr is None:
+        return nan, nan, nan, nan, nan, nan, nan
+    if len(best_corr) == 7:
+        k1, k2, k3, w1, w2, w3, _ = best_corr
+        return k1, k2, k3, w1, w1, w2, w3
+    if len(best_corr) == 4:
+        k1, k2, w, _ = best_corr
+        return k1, k2, nan, w, w, 1.0 - w, nan
+    k, _ = best_corr
+    return k, nan, nan, 1.0, 1.0, nan, nan
+
+
 def _spearman_for_best_corr(sub_df, best_corr):
     """Spearman correlation and p-value of a recommendation vs tree distance.
 
-    Single-k uses the k-mer distance column. A two-k recommendation uses the
-    same weighted rank-sum that `_sweep_best_corr` optimizes:
-    ``w * rank(k1) + (1-w) * rank(k2)``.
+    Single-k uses the k-mer distance column. Two- and three-k recommendations
+    use the same weighted rank-sum that the sweep optimizes.
     """
     if best_corr is None or len(sub_df) < 3:
         return np.nan, np.nan
     tree_dist = sub_df["tree_distance"]
-    if len(best_corr) == 4:
+    if len(best_corr) == 7:
+        k1, k2, k3, w1, w2, w3, _ = best_corr
+        values = (w1 * sub_df[f"k{k1}_distance"].rank().to_numpy()
+                  + w2 * sub_df[f"k{k2}_distance"].rank().to_numpy()
+                  + w3 * sub_df[f"k{k3}_distance"].rank().to_numpy())
+        corr, pvalue = spearmanr(values, tree_dist)
+    elif len(best_corr) == 4:
         k1, k2, w, _ = best_corr
         values = (w * sub_df[f"k{k1}_distance"].rank().to_numpy()
                   + (1.0 - w) * sub_df[f"k{k2}_distance"].rank().to_numpy())
@@ -468,12 +650,16 @@ def _same_ks_and_weight(full_best, masked_best):
     """True when masked recommendation uses the same k-mer(s) and weight as full."""
     if full_best is None or masked_best is None:
         return False
+    if len(full_best) != len(masked_best):
+        return False
     fs = recommendation_summary(full_best)
     ms = recommendation_summary(masked_best)
     if fs["ks"] != ms["ks"]:
         return False
     if len(full_best) == 2:
         return True
+    if len(full_best) == 7:
+        return full_best[3:6] == masked_best[3:6]
     return full_best[2] == masked_best[2]
 
 
@@ -488,14 +674,18 @@ def _recommendation_match_row(full_best, masked_best, tol):
     matched_ks = (bool(ms["ks"] == fs["ks"])
                   if ms["ks"] is not None and fs["ks"] is not None else False)
     matched_ks_w = matched_ks and _same_ks_and_weight(full_best, masked_best)
-    k1, k2, w = _best_corr_ks_weight(masked_best)
+    k1, k2, k3, w, w1, w2, w3 = _recommendation_ks_weights(masked_best)
     k_eff_dev = k_eff - k_eff_global if not np.isnan(k_eff) else np.nan
     return {
         "k_eff": k_eff,
         "n_ks": ms["n_ks"],
         "k1": k1,
         "k2": k2,
+        "k3": k3,
         "w": w,
+        "w1": w1,
+        "w2": w2,
+        "w3": w3,
         "matched_k_eff": matched_k_eff,
         "matched_ks": matched_ks,
         "matched_ks_w": matched_ks_w,
@@ -977,10 +1167,75 @@ def global_consistency(tree, merged_df, fracs, n_runs=10, k_low=6, k_high=40,
     return out
 
 
+def _run_effective_match_consistency(tree, merged_df, fracs, n_runs, k_low,
+                                     k_high, w_step, seed, tol, dataset,
+                                     sweep_fn, meta_extra=None, verbose=False):
+    """Shared masking loop for 2-k and up-to-3-k effective-match simulations."""
+    df = _as_pair_indexed(merged_df)
+    fracs = list(fracs)
+    _, _, best_full = sweep_fn(df, k_low, k_high, w_step)
+    full = recommendation_summary(best_full)
+    full_corr, full_pvalue = _spearman_for_best_corr(df, best_full)
+    full["corr"] = full_corr
+    full["pvalue"] = full_pvalue
+
+    rng_master = np.random.default_rng(seed)
+    rows = []
+    for frac in fracs:
+        if verbose:
+            print(f"  masking {float(frac):.0%} ({n_runs} runs)", flush=True)
+        for run in range(n_runs):
+            run_seed = int(rng_master.integers(0, 2**31 - 1))
+            masked = mask_genomes(tree, frac, seed=run_seed)
+            keep = ~(df["genome_1"].isin(masked) | df["genome_2"].isin(masked))
+            sub = df[keep]
+
+            _, _, best_m = sweep_fn(sub, k_low, k_high, w_step)
+            row = _recommendation_match_row(best_full, best_m, tol)
+            corr, pvalue = _spearman_for_best_corr(sub, best_m)
+            row.update({
+                "dataset": dataset,
+                "seed": seed,
+                "run_seed": run_seed,
+                "frac": float(frac),
+                "run": run,
+                "corr": corr,
+                "pvalue": pvalue,
+            })
+            rows.append(row)
+
+    runs = pd.DataFrame(rows)
+    col_order = [
+        "dataset", "seed", "run_seed", "frac", "run",
+        "k1", "k2", "k3", "w", "w1", "w2", "w3", "n_ks", "k_eff",
+        "corr", "pvalue",
+        "matched_k_eff", "matched_ks", "matched_ks_w", "k_eff_dev",
+    ]
+    runs = runs[[c for c in col_order if c in runs.columns]]
+    meta = {
+        "dataset": dataset,
+        "tol": tol,
+        "k_low": k_low,
+        "k_high": k_high,
+        "w_step": w_step,
+        "seed": seed,
+        "fracs": fracs,
+        "n_runs": n_runs,
+    }
+    if meta_extra:
+        meta.update(meta_extra)
+    return GlobalEffectiveMatchResults(
+        runs=runs,
+        full=full,
+        full_best_corr=best_full,
+        meta=meta,
+    )
+
+
 def global_effective_match_consistency(tree, merged_df, fracs, n_runs=10,
                                        k_low=6, k_high=40, w_step=0.05, seed=0,
                                        tol=1, dataset=None):
-    """Whole-tree effective-k match rate vs masking fraction.
+    """Whole-tree effective-k match rate vs masking fraction (up to 2 k-mers).
 
     A lighter variant of `global_consistency` that computes the effective
     match rate: for each masking fraction it masks `n_runs` random genome
@@ -1003,67 +1258,32 @@ def global_effective_match_consistency(tree, merged_df, fracs, n_runs=10,
         dataset: Optional dataset name stored on every run row.
 
     Returns:
-        GlobalEffectiveMatchResults: ``runs`` has one row per (frac, run) with
-        columns ``dataset, seed, run_seed, frac, run, k1, k2, w, n_ks, k_eff,
-        corr, pvalue, matched_k_eff, matched_ks, matched_ks_w, k_eff_dev``.
+        GlobalEffectiveMatchResults: ``runs`` has one row per (frac, run).
         ``full`` holds the full-data summary (including ``corr`` / ``pvalue``);
         ``full_best_corr`` is the raw best_corr tuple.
     """
-    df = _as_pair_indexed(merged_df)
-    fracs = list(fracs)
-    _, _, best_full = _sweep_best_corr(df, k_low, k_high, w_step)
-    full = recommendation_summary(best_full)
-    full_corr, full_pvalue = _spearman_for_best_corr(df, best_full)
-    full["corr"] = full_corr
-    full["pvalue"] = full_pvalue
+    return _run_effective_match_consistency(
+        tree, merged_df, fracs, n_runs, k_low, k_high, w_step, seed, tol,
+        dataset, sweep_fn=_sweep_best_corr, meta_extra={"max_kmers": 2})
 
-    rng_master = np.random.default_rng(seed)
-    rows = []
-    for frac in fracs:
-        for run in range(n_runs):
-            run_seed = int(rng_master.integers(0, 2**31 - 1))
-            masked = mask_genomes(tree, frac, seed=run_seed)
-            keep = ~(df["genome_1"].isin(masked) | df["genome_2"].isin(masked))
-            sub = df[keep]
 
-            _, _, best_m = _sweep_best_corr(sub, k_low, k_high, w_step)
-            row = _recommendation_match_row(best_full, best_m, tol)
-            corr, pvalue = _spearman_for_best_corr(sub, best_m)
-            row.update({
-                "dataset": dataset,
-                "seed": seed,
-                "run_seed": run_seed,
-                "frac": float(frac),
-                "run": run,
-                "corr": corr,
-                "pvalue": pvalue,
-            })
-            rows.append(row)
+def global_effective_match_consistency_global(
+        tree, merged_df, fracs, n_runs=10, k_low=6, k_high=40, w_step=0.05,
+        seed=0, tol=1, dataset=None):
+    """Whole-tree effective-k match rate vs masking, searching 1–3 k-mers.
 
-    runs = pd.DataFrame(rows)
-    col_order = [
-        "dataset", "seed", "run_seed", "frac", "run",
-        "k1", "k2", "w", "n_ks", "k_eff",
-        "corr", "pvalue",
-        "matched_k_eff", "matched_ks", "matched_ks_w", "k_eff_dev",
-    ]
-    runs = runs[[c for c in col_order if c in runs.columns]]
-    meta = {
-        "dataset": dataset,
-        "tol": tol,
-        "k_low": k_low,
-        "k_high": k_high,
-        "w_step": w_step,
-        "seed": seed,
-        "fracs": fracs,
-        "n_runs": n_runs,
-    }
-    return GlobalEffectiveMatchResults(
-        runs=runs,
-        full=full,
-        full_best_corr=best_full,
-        meta=meta,
-    )
+    Same masking protocol as `global_effective_match_consistency`, but the
+    recommendation at each run is the globally best of:
+      - every single k in ``[k_low, k_high]``
+      - every distinct pair with positive weights (step `w_step`)
+      - every distinct triple with positive simplex weights (step `w_step`)
+
+    Saved rows include ``k1,k2,k3`` and ``w1,w2,w3`` (unused fields are NaN).
+    """
+    return _run_effective_match_consistency(
+        tree, merged_df, fracs, n_runs, k_low, k_high, w_step, seed, tol,
+        dataset, sweep_fn=_sweep_best_corr_global, meta_extra={"max_kmers": 3},
+        verbose=True)
 
 
 def node_consistency(tree, merged_df, fracs, n_runs=5, k_low=6, k_high=40,
