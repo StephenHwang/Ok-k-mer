@@ -441,6 +441,29 @@ def _best_corr_ks_weight(best_corr):
     return k, np.nan, np.nan
 
 
+def _spearman_for_best_corr(sub_df, best_corr):
+    """Spearman correlation and p-value of a recommendation vs tree distance.
+
+    Single-k uses the k-mer distance column. A two-k recommendation uses the
+    same weighted rank-sum that `_sweep_best_corr` optimizes:
+    ``w * rank(k1) + (1-w) * rank(k2)``.
+    """
+    if best_corr is None or len(sub_df) < 3:
+        return np.nan, np.nan
+    tree_dist = sub_df["tree_distance"]
+    if len(best_corr) == 4:
+        k1, k2, w, _ = best_corr
+        values = (w * sub_df[f"k{k1}_distance"].rank().to_numpy()
+                  + (1.0 - w) * sub_df[f"k{k2}_distance"].rank().to_numpy())
+        corr, pvalue = spearmanr(values, tree_dist)
+    else:
+        k, _ = best_corr
+        corr, pvalue = spearmanr(sub_df[f"k{k}_distance"], tree_dist)
+    if corr is None or np.isnan(corr):
+        return np.nan, np.nan
+    return float(corr), float(pvalue)
+
+
 def _same_ks_and_weight(full_best, masked_best):
     """True when masked recommendation uses the same k-mer(s) and weight as full."""
     if full_best is None or masked_best is None:
@@ -956,15 +979,17 @@ def global_consistency(tree, merged_df, fracs, n_runs=10, k_low=6, k_high=40,
 
 def global_effective_match_consistency(tree, merged_df, fracs, n_runs=10,
                                        k_low=6, k_high=40, w_step=0.05, seed=0,
-                                       tol=1):
+                                       tol=1, dataset=None):
     """Whole-tree effective-k match rate vs masking fraction.
 
-    A lighter variant of `global_consistency` that computes only the effective
+    A lighter variant of `global_consistency` that computes the effective
     match rate: for each masking fraction it masks `n_runs` random genome
     subsets, recomputes the whole-tree (root) recommendation on the remaining
     genomes, and flags a match when the masked ``k_eff`` is within `tol` of the
-    full-data ``k_eff``. The Kendall-tau / dispersion / correlation-retention
-    measures are skipped, so this is considerably faster.
+    full-data ``k_eff``. Each run also stores the recommended k-mers / weight
+    and the Spearman correlation (and p-value) of that recommendation against
+    tree distance. Kendall-tau / dispersion / correlation-retention measures
+    are skipped, so this is still considerably faster than `global_consistency`.
 
     Args:
         tree: Named tree.
@@ -972,20 +997,25 @@ def global_effective_match_consistency(tree, merged_df, fracs, n_runs=10,
             `tree_distance`, `k{K}_distance`).
         fracs: Iterable of masking fractions in ``[0, 1)``.
         n_runs: Random masking repeats per fraction.
-        k_low, k_high, w_step: Sweep parameters.
+        k_low, k_high, w_step: Sweep parameters. Default weight step is 0.05.
         seed: Master RNG seed.
         tol: ``|k_eff|`` tolerance (k units) for the match flag.
+        dataset: Optional dataset name stored on every run row.
 
     Returns:
         GlobalEffectiveMatchResults: ``runs`` has one row per (frac, run) with
-        columns ``frac, run, k_eff, n_ks, k1, k2, w, matched_k_eff,
-        matched_ks, matched_ks_w, k_eff_dev``. ``full`` holds the full-data
-        summary; ``full_best_corr`` is the raw best_corr tuple.
+        columns ``dataset, seed, run_seed, frac, run, k1, k2, w, n_ks, k_eff,
+        corr, pvalue, matched_k_eff, matched_ks, matched_ks_w, k_eff_dev``.
+        ``full`` holds the full-data summary (including ``corr`` / ``pvalue``);
+        ``full_best_corr`` is the raw best_corr tuple.
     """
     df = _as_pair_indexed(merged_df)
     fracs = list(fracs)
     _, _, best_full = _sweep_best_corr(df, k_low, k_high, w_step)
     full = recommendation_summary(best_full)
+    full_corr, full_pvalue = _spearman_for_best_corr(df, best_full)
+    full["corr"] = full_corr
+    full["pvalue"] = full_pvalue
 
     rng_master = np.random.default_rng(seed)
     rows = []
@@ -998,10 +1028,28 @@ def global_effective_match_consistency(tree, merged_df, fracs, n_runs=10,
 
             _, _, best_m = _sweep_best_corr(sub, k_low, k_high, w_step)
             row = _recommendation_match_row(best_full, best_m, tol)
-            row.update({"frac": float(frac), "run": run})
+            corr, pvalue = _spearman_for_best_corr(sub, best_m)
+            row.update({
+                "dataset": dataset,
+                "seed": seed,
+                "run_seed": run_seed,
+                "frac": float(frac),
+                "run": run,
+                "corr": corr,
+                "pvalue": pvalue,
+            })
             rows.append(row)
 
+    runs = pd.DataFrame(rows)
+    col_order = [
+        "dataset", "seed", "run_seed", "frac", "run",
+        "k1", "k2", "w", "n_ks", "k_eff",
+        "corr", "pvalue",
+        "matched_k_eff", "matched_ks", "matched_ks_w", "k_eff_dev",
+    ]
+    runs = runs[[c for c in col_order if c in runs.columns]]
     meta = {
+        "dataset": dataset,
         "tol": tol,
         "k_low": k_low,
         "k_high": k_high,
@@ -1011,7 +1059,7 @@ def global_effective_match_consistency(tree, merged_df, fracs, n_runs=10,
         "n_runs": n_runs,
     }
     return GlobalEffectiveMatchResults(
-        runs=pd.DataFrame(rows),
+        runs=runs,
         full=full,
         full_best_corr=best_full,
         meta=meta,
@@ -1194,21 +1242,10 @@ def plot_global_effective_match_consistency(results, name, display=True, tol=Non
     return fig
 
 
-def plot_effective_length_vs_masking(results_by_name, display=True, show_spread=True,
-                                      ax=None):
-    """Overlay mean effective k vs masking fraction for several datasets.
-
-    Args:
-        results_by_name: Mapping ``{dataset_name: results}`` where each value is
-            a `GlobalEffectiveMatchResults` (or legacy DataFrame) from
-            `global_effective_match_consistency`.
-        display: Show the figure inline.
-        show_spread: Shade mean +/- 1 std of k_eff across runs per fraction.
-        ax: Optional existing axis to draw on.
-
-    Returns:
-        matplotlib.figure.Figure
-    """
+def _plot_metric_vs_masking(results_by_name, y_col, ylabel, display=True,
+                            show_spread=True, ax=None, y_scale=1.0,
+                            ymin_at_most=None, ymax=None):
+    """Overlay mean ``y_col`` vs masking fraction for several datasets."""
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(7, 5))
     else:
@@ -1225,31 +1262,88 @@ def plot_effective_length_vs_masking(results_by_name, display=True, show_spread=
 
     color_overrides = {"Cyano": "C2", "Caldisericia": "C4"}
 
+    y_mins = []
     for i, (name, results) in enumerate(results_by_name.items()):
         df, _full, _meta, _tol = _normalize_effective_match_results(results)
-        grp = df.groupby("frac")["k_eff"]
-        mean = grp.mean()
+        if y_col not in df.columns:
+            raise KeyError(
+                f"{name!r} results have no {y_col!r} column; re-run "
+                "global_effective_match_consistency to store Spearman stats.")
+        grp = df.groupby("frac")[y_col]
+        mean = y_scale * grp.mean()
         fracs = mean.index.to_numpy(dtype=float)
         color = color_overrides.get(name, f"C{i % 10}")
         ax.plot(fracs, mean.to_numpy(), marker="o", color=color,
                 label=label_overrides.get(name, name))
+        y_mins.append(float(np.nanmin(mean.to_numpy())))
         if show_spread:
-            std = grp.std()
-            ax.fill_between(fracs, (mean - std).to_numpy(), (mean + std).to_numpy(),
+            std = np.abs(y_scale) * grp.std()
+            lower = (mean - std).to_numpy()
+            ax.fill_between(fracs, lower, (mean + std).to_numpy(),
                             color=color, alpha=0.15)
+            y_mins.append(float(np.nanmin(lower)))
 
     ax.set_xlabel("Masking fraction")
-    ax.set_ylabel("Weighted composite rank")
+    ax.set_ylabel(ylabel)
     ax.xaxis.set_major_formatter(
         mticker.FuncFormatter(lambda x, _pos: f"{x * 100:.0f}%"))
+    if ymin_at_most is not None or ymax is not None:
+        min_corr = min(y_mins) if y_mins else ymin_at_most
+        y0 = min(ymin_at_most, min_corr) if ymin_at_most is not None else None
+        ax.set_ylim(y0, ymax)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.tick_params(direction="in")
-    ax.legend(frameon=False, fontsize=9, loc="upper left", ncol=2)
+    ax.legend(frameon=False, fontsize=9, loc="upper left", ncol=2,
+              bbox_to_anchor=(0.0, 1.06))
     fig.tight_layout()
     if display:
         plt.show()
     return fig
+
+
+def plot_effective_length_vs_masking(results_by_name, display=True, show_spread=True,
+                                      ax=None):
+    """Overlay mean effective k vs masking fraction for several datasets.
+
+    Args:
+        results_by_name: Mapping ``{dataset_name: results}`` where each value is
+            a `GlobalEffectiveMatchResults` (or legacy DataFrame) from
+            `global_effective_match_consistency`.
+        display: Show the figure inline.
+        show_spread: Shade mean +/- 1 std of k_eff across runs per fraction.
+        ax: Optional existing axis to draw on.
+
+    Returns:
+        matplotlib.figure.Figure
+    """
+    return _plot_metric_vs_masking(
+        results_by_name, y_col="k_eff", ylabel="Weighted composite rank",
+        display=display, show_spread=show_spread, ax=ax)
+
+
+def plot_spearman_vs_masking(results_by_name, display=True, show_spread=True,
+                             ax=None):
+    """Overlay mean sign-flipped Spearman rho vs masking fraction.
+
+    Stored correlations are negative (k-mer distance falls as tree distance
+    grows); this plots ``-rho`` so larger values mean stronger agreement.
+
+    Args:
+        results_by_name: Mapping ``{dataset_name: results}`` where each value is
+            a `GlobalEffectiveMatchResults` from
+            `global_effective_match_consistency`.
+        display: Show the figure inline.
+        show_spread: Shade mean +/- 1 std of ``-rho`` across runs per fraction.
+        ax: Optional existing axis to draw on.
+
+    Returns:
+        matplotlib.figure.Figure
+    """
+    return _plot_metric_vs_masking(
+        results_by_name, y_col="corr", ylabel=r"Spearman correlation, $\rho$",
+        display=display, show_spread=show_spread, ax=ax, y_scale=-1.0,
+        ymin_at_most=0.4, ymax=1.0)
 
 
 def plot_node_consistency(results_df, name, display=True):
