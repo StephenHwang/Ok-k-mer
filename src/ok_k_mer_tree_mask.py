@@ -1215,12 +1215,12 @@ def plot_effective_length_vs_masking(results_by_name, display=True, show_spread=
         fig = ax.figure
 
     label_overrides = {
-        "Aquificota": "Aquificota",
-        "Bacillales": "Bacillales_A",
-        "Caldisericia": "Caldisericia",
-        "Chlamydia": "Chlamydiales",
-        "Cyano": "Cyanobacteriales",
-        "Neisseriaceae": "Neisseriaceae",
+        "Aquificota": "p_Aquificota (132)",
+        "Bacillales": "o_Bacillales_A (249)",
+        "Caldisericia": "c_Caldisericia (49)",
+        "Chlamydia": "o_Chlamydiales (288)",
+        "Cyano": "o_Cyanobacteriales (585)",
+        "Neisseriaceae": "f_Neisseriaceae (145)",
     }
 
     color_overrides = {"Cyano": "C2", "Caldisericia": "C4"}
