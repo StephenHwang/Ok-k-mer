@@ -542,6 +542,140 @@ def compute_node_annotations(tree, merged_df, k_low=6, k_high=40, w_step=0.05,
     return node_info
 
 
+_NODE_ANNOT_COLUMNS = [
+    "node_id",
+    "best_k1", "best_k2", "best_k3",
+    "best_w", "best_w1", "best_w2", "best_w3",
+    "best_corr",
+    "wm_k1", "wm_k2", "wm_w", "wm_corr",
+    "local_minima",
+]
+
+
+def _annotation_sep(path):
+    """Tab for ``.tsv``, comma otherwise."""
+    return "\t" if str(path).lower().endswith(".tsv") else ","
+
+
+def _is_missing(value):
+    return value is None or pd.isna(value)
+
+
+def _best_corr_to_fields(best_corr):
+    """Flatten a `best_corr` tuple into table columns."""
+    fields = {c: np.nan for c in (
+        "best_k1", "best_k2", "best_k3",
+        "best_w", "best_w1", "best_w2", "best_w3", "best_corr")}
+    if best_corr is None:
+        return fields
+    if len(best_corr) == 7:
+        k1, k2, k3, w1, w2, w3, corr = best_corr
+        fields.update(best_k1=k1, best_k2=k2, best_k3=k3,
+                      best_w1=w1, best_w2=w2, best_w3=w3, best_corr=corr)
+    elif len(best_corr) == 4:
+        k1, k2, w, corr = best_corr
+        fields.update(best_k1=k1, best_k2=k2, best_w=w, best_corr=corr)
+    else:
+        k, corr = best_corr
+        fields.update(best_k1=k, best_corr=corr)
+    return fields
+
+
+def _fields_to_best_corr(row):
+    """Rebuild a `best_corr` tuple from one annotation row."""
+    if _is_missing(row["best_corr"]):
+        return None
+    corr = float(row["best_corr"])
+    if not _is_missing(row["best_k3"]):
+        return (int(row["best_k1"]), int(row["best_k2"]), int(row["best_k3"]),
+                float(row["best_w1"]), float(row["best_w2"]), float(row["best_w3"]),
+                corr)
+    if not _is_missing(row["best_k2"]):
+        return (int(row["best_k1"]), int(row["best_k2"]), float(row["best_w"]), corr)
+    return (int(row["best_k1"]), corr)
+
+
+def _encode_local_minima(local_minima):
+    """Pack ``[(k, corr), ...]`` as ``k:corr;k:corr``."""
+    if not local_minima:
+        return ""
+    return ";".join(f"{int(k)}:{float(corr)}" for k, corr in local_minima)
+
+
+def _decode_local_minima(text):
+    if _is_missing(text) or str(text).strip() == "":
+        return []
+    out = []
+    for part in str(text).split(";"):
+        k, corr = part.split(":")
+        out.append((int(k), float(corr)))
+    return out
+
+
+def _weighted_minima_to_fields(weighted_minima):
+    if weighted_minima is None or weighted_minima[0] is None:
+        return {"wm_k1": np.nan, "wm_k2": np.nan, "wm_w": np.nan, "wm_corr": np.nan}
+    k1, k2, w, corr = weighted_minima
+    return {"wm_k1": k1, "wm_k2": k2, "wm_w": w, "wm_corr": corr}
+
+
+def _fields_to_weighted_minima(row):
+    if _is_missing(row["wm_k1"]):
+        return (None, None, None, None)
+    return (int(row["wm_k1"]), int(row["wm_k2"]),
+            float(row["wm_w"]), float(row["wm_corr"]))
+
+
+def save_node_annotations(node_info, path):
+    """Write `compute_node_annotations` output as a table keyed by node id.
+
+    One row per internal node. ``best_corr`` is split into ``best_k*`` /
+    ``best_w*`` / ``best_corr`` columns, ``weighted_minima`` into ``wm_*``, and
+    ``local_minima`` into a single ``k:corr;k:corr`` field. A path ending in
+    ``.tsv`` is tab-separated; any other extension is comma-separated.
+
+    Args:
+        node_info: Dict ``{node_id: {'local_minima', 'weighted_minima',
+            'best_corr'}}``.
+        path: Output path, for example ``res/Cyano_node_annotations.tsv``.
+    """
+    rows = []
+    for node_id, info in node_info.items():
+        row = {"node_id": node_id}
+        row.update(_best_corr_to_fields(info.get("best_corr")))
+        row.update(_weighted_minima_to_fields(info.get("weighted_minima")))
+        row["local_minima"] = _encode_local_minima(info.get("local_minima"))
+        rows.append(row)
+    df = pd.DataFrame(rows, columns=_NODE_ANNOT_COLUMNS)
+    for col in ("best_k1", "best_k2", "best_k3", "wm_k1", "wm_k2"):
+        df[col] = df[col].astype("Int64")
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    df.to_csv(path, sep=_annotation_sep(path), index=False)
+
+
+def read_node_annotations(path):
+    """Load a node-annotation dict written by `save_node_annotations`.
+
+    ``node_id`` is the dict key. A path ending in ``.tsv`` is read as
+    tab-separated; any other extension is read as comma-separated. Example:
+    ``res/Cyano_node_annotations.tsv``.
+    """
+    df = pd.read_csv(path, sep=_annotation_sep(path))
+    missing = [c for c in _NODE_ANNOT_COLUMNS if c not in df.columns]
+    if missing:
+        raise ValueError(f"{path} is missing columns: {missing}")
+    node_info = {}
+    for row in df.to_dict(orient="records"):
+        node_info[str(row["node_id"])] = {
+            "local_minima": _decode_local_minima(row["local_minima"]),
+            "weighted_minima": _fields_to_weighted_minima(row),
+            "best_corr": _fields_to_best_corr(row),
+        }
+    return node_info
+
+
 ################################################################################
 # Genome masking and recommendation summaries
 
