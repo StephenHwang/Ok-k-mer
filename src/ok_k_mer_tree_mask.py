@@ -836,15 +836,15 @@ def kendall_tau_distance(scores_a, scores_b):
 def plot_tree_annotated(tree, node_info, name=None, k_low=6, k_high=40,
                         k_color=None, show_corr=True, show_weight=True,
                         masked=None, outpath=None, width=1500, scale=2000,
-                        display=True, dpi=None):
+                        display=True, dpi=None, node_id=None):
     """Render a tree, annotating internal nodes with their best correlation.
 
     Each internal node with a non-``None`` ``best_corr`` gets:
       - a `PieChartFace` of the k weight(s) colored via `k_color` (when
         `show_weight`),
-      - a `TextFace` label summarizing k / w (and ``corr`` when `show_corr`).
+      - a `TextFace` label summarizing k / w (and ``ρ`` when `show_corr`).
         The stored correlation is negative, so it is reported sign-flipped
-        (i.e. ``corr = -stored``) as a positive value.
+        (i.e. ``ρ = -stored``) as a positive value.
 
     Args:
         tree: Named tree (from `load_named_tree`).
@@ -860,14 +860,22 @@ def plot_tree_annotated(tree, node_info, name=None, k_low=6, k_high=40,
         width: Render width in pixels.
         scale: Branch-length scale.
         display: Show the rendered image inline.
+        node_id: Optional internal-node name. When given, only the subtree
+            rooted at that node is plotted.
 
     Returns:
         str: the output image path.
     """
+    if node_id is not None:
+        tree = subtree_at_node(tree, node_id)
+        node_info = subset_node_info(node_info, tree)
     if k_color is None:
         k_color = make_k_color(k_low, k_high)
     if outpath is None:
         outpath = f"{name or 'tree'}_tree_annotated.png"
+    parent = os.path.dirname(outpath)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     masked = set() if masked is None else set(masked)
 
     ts = _basic_tree_style(scale=scale)
@@ -912,7 +920,7 @@ def plot_tree_annotated(tree, node_info, name=None, k_low=6, k_high=40,
 
             # Stored corr is negative; report it sign-flipped as positive.
             if show_corr:
-                label += f"\ncorr={round(-corr, 3)}"
+                label += f"\nρ={round(-corr, 3)}"
 
             if show_weight:
                 pie = faces.PieChartFace(weights, colors=colors, width=50, height=50)
@@ -1000,19 +1008,21 @@ def plot_subtree_annotated(tree, node_info, root_node_name, name=None,
                            k_low=6, k_high=40, k_color=None, show_corr=True,
                            show_weight=True, outpath=None, width=1500,
                            scale=2000, display=True, dpi=None):
-    """Plot only the subtree rooted at `root_node_name` with its annotations."""
-    subtree = subtree_at_node(tree, root_node_name)
-    sub_info = subset_node_info(node_info, subtree)
+    """Plot only the subtree rooted at `root_node_name` with its annotations.
+
+    Thin wrapper around `plot_tree_annotated(..., node_id=root_node_name)`.
+    """
     if outpath is None:
         suffix = root_node_name.replace("internal_node_", "node")
         outpath = "{base}_subtree_{suffix}_annotated.png".format(
             base=name or "tree", suffix=suffix)
-    if outpath:  # ensure the destination directory exists
-        os.makedirs(os.path.dirname(outpath) or ".", exist_ok=True)
-    plot_tree_annotated(subtree, sub_info, name=name, k_low=k_low, k_high=k_high,
+    plot_tree_annotated(tree, node_info, name=name, k_low=k_low, k_high=k_high,
                         k_color=k_color, show_corr=show_corr,
                         show_weight=show_weight, outpath=outpath, width=width,
-                        scale=scale, display=display, dpi=dpi)
+                        scale=scale, display=display, dpi=dpi,
+                        node_id=root_node_name)
+    subtree = subtree_at_node(tree, root_node_name)
+    sub_info = subset_node_info(node_info, subtree)
     return subtree, sub_info, outpath
 
 
