@@ -1608,8 +1608,14 @@ def plot_global_effective_match_consistency(results, name, display=True, tol=Non
 
 def _plot_metric_vs_masking(results_by_name, y_col, ylabel, display=True,
                             show_spread=True, ax=None, y_scale=1.0,
-                            ymin_at_most=None, ymax=None):
-    """Overlay mean ``y_col`` vs masking fraction for several datasets."""
+                            ymin_at_most=None, ymax=None, max_frac=None):
+    """Overlay mean ``y_col`` vs masking fraction for several datasets.
+
+    Args:
+        max_frac: Highest masking fraction to draw, in ``[0, 1)``. ``0.6``
+            keeps the 0% through 60% deciles. ``None`` draws every fraction
+            present in the results.
+    """
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(7, 5))
     else:
@@ -1633,6 +1639,8 @@ def _plot_metric_vs_masking(results_by_name, y_col, ylabel, display=True,
             raise KeyError(
                 f"{name!r} results have no {y_col!r} column; re-run "
                 "global_effective_match_consistency to store Spearman stats.")
+        if max_frac is not None:
+            df = df.loc[df["frac"] <= max_frac + 1e-9]
         grp = df.groupby("frac")[y_col]
         mean = y_scale * grp.mean()
         fracs = mean.index.to_numpy(dtype=float)
@@ -1667,7 +1675,7 @@ def _plot_metric_vs_masking(results_by_name, y_col, ylabel, display=True,
 
 
 def plot_effective_length_vs_masking(results_by_name, display=True, show_spread=True,
-                                      ax=None):
+                                      ax=None, max_frac=None):
     """Overlay mean effective k vs masking fraction for several datasets.
 
     Args:
@@ -1677,17 +1685,19 @@ def plot_effective_length_vs_masking(results_by_name, display=True, show_spread=
         display: Show the figure inline.
         show_spread: Shade mean +/- 1 std of k_eff across runs per fraction.
         ax: Optional existing axis to draw on.
+        max_frac: Highest masking fraction to draw (for example ``0.6``).
+            ``None`` draws every fraction in the results.
 
     Returns:
         matplotlib.figure.Figure
     """
     return _plot_metric_vs_masking(
         results_by_name, y_col="k_eff", ylabel="Weighted composite rank",
-        display=display, show_spread=show_spread, ax=ax)
+        display=display, show_spread=show_spread, ax=ax, max_frac=max_frac)
 
 
 def plot_spearman_vs_masking(results_by_name, display=True, show_spread=True,
-                             ax=None):
+                             ax=None, max_frac=None):
     """Overlay mean sign-flipped Spearman rho vs masking fraction.
 
     Stored correlations are negative (k-mer distance falls as tree distance
@@ -1700,6 +1710,8 @@ def plot_spearman_vs_masking(results_by_name, display=True, show_spread=True,
         display: Show the figure inline.
         show_spread: Shade mean +/- 1 std of ``-rho`` across runs per fraction.
         ax: Optional existing axis to draw on.
+        max_frac: Highest masking fraction to draw (for example ``0.6``).
+            ``None`` draws every fraction in the results.
 
     Returns:
         matplotlib.figure.Figure
@@ -1707,7 +1719,7 @@ def plot_spearman_vs_masking(results_by_name, display=True, show_spread=True,
     return _plot_metric_vs_masking(
         results_by_name, y_col="corr", ylabel=r"Spearman correlation, $\rho$",
         display=display, show_spread=show_spread, ax=ax, y_scale=-1.0,
-        ymin_at_most=0.4, ymax=1.0)
+        ymin_at_most=0.4, ymax=1.0, max_frac=max_frac)
 
 
 def plot_node_consistency(results_df, name, display=True):
