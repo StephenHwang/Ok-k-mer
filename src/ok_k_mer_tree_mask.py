@@ -469,16 +469,16 @@ def _sweep_best_corr_global(sub_df, k_low=6, k_high=40, w_step=0.05):
 
 
 def compute_node_annotations(tree, merged_df, k_low=6, k_high=40, w_step=0.05,
-                             masked=None):
+                             masked=None, max_k=2):
     """Sweep correlations for every internal node of `tree`.
 
     For each internal node, the II set is every pair of leaves under it. The
     correlation between each ``k{k}_distance`` (ranked) and ``tree_distance`` is
-    swept over ``[k_low, k_high]``, and an exhaustive global search over every
-    pair of ks and every weight looks for the most-negative weighted-rank
-    correlation. ``best_corr`` is whichever is better (most negative) between the
-    globally best single k and the globally best weighted pair (see
-    `_sweep_best_corr`).
+    swept over ``[k_low, k_high]``. ``best_corr`` is the most-negative result
+    among every single k and every weighted pair (``max_k=2``, see
+    `_sweep_best_corr`). With ``max_k=3`` the same search also covers every
+    distinct triple and its positive simplex weights (`_sweep_best_corr_global`);
+    the stored recommendation is still only the single winner.
 
     Args:
         tree: A tree from `load_named_tree` (internal nodes must be named).
@@ -489,13 +489,19 @@ def compute_node_annotations(tree, merged_df, k_low=6, k_high=40, w_step=0.05,
         masked: Optional set of genome (leaf) names to exclude. Each node's II
             set is restricted to pairs of un-masked genomes; the tree topology
             and node names are unchanged.
+        max_k: ``2`` or ``3``. Highest number of k-mers considered. The saved
+            ``best_corr`` uses only as many k-mers as the winning recommendation.
 
     Returns:
         dict: ``{node_name: {'local_minima': [...], 'weighted_minima': (...),
         'best_corr': ...}}``. ``best_corr`` is ``None`` for nodes with too few
-        leaves / no local minima; a ``(k, corr)`` tuple for a single k; or a
-        ``(k1, k2, w, corr)`` tuple for a weighted pair.
+        leaves / no local minima; a ``(k, corr)`` tuple for a single k; a
+        ``(k1, k2, w, corr)`` tuple for a weighted pair; or, when ``max_k=3``
+        and a triple wins, a ``(k1, k2, k3, w1, w2, w3, corr)`` tuple.
     """
+    if max_k not in (2, 3):
+        raise ValueError(f"max_k must be 2 or 3, got {max_k}")
+    sweep = _sweep_best_corr_global if max_k == 3 else _sweep_best_corr
     masked = set() if masked is None else set(masked)
 
     # Index by genome_pair for fast subsetting.
@@ -518,7 +524,7 @@ def compute_node_annotations(tree, merged_df, k_low=6, k_high=40, w_step=0.05,
                 "best_corr": None}
             continue
 
-        local_minima, weighted_minima, best_corr = _sweep_best_corr(
+        local_minima, weighted_minima, best_corr = sweep(
             df.loc[pairs], k_low=k_low, k_high=k_high, w_step=w_step)
         node_info[node.name] = {"local_minima": local_minima,
                                 "weighted_minima": weighted_minima,
@@ -1038,10 +1044,16 @@ def plot_tree_annotated(tree, node_info, name=None, k_low=6, k_high=40,
             faces.add_face_to_node(name_face, node, column=0,
                                    position="branch-right")
 
-        # Skip annotations on small clades (<= 4 descendant genomes).
+        # Annotate only clades with at least 5 descendant leaves.
         best = None if node.is_leaf() else node_info.get(node.name, {}).get("best_corr")
-        if best is not None and len(node.get_leaves()) > 4:
-            if len(best) == 4:                     # weighted pair (k1, k2, w, corr)
+        n_leaves = 0 if node.is_leaf() else len(node.get_leaves())
+        if best is not None and n_leaves >= 5:
+            if len(best) == 7:                     # weighted triple
+                k1, k2, k3, w1, w2, w3, corr = best
+                colors = [k_color.get(k, "#808080") for k in (k1, k2, k3)]
+                weights = [w1 * 100, w2 * 100, w3 * 100]
+                label = f"k={k1},{k2},{k3}\nw={w1},{w2},{w3}"
+            elif len(best) == 4:                   # weighted pair (k1, k2, w, corr)
                 k1, k2, w, corr = best
                 colors = [k_color.get(k1, "#808080"), k_color.get(k2, "#808080")]
                 weights = [w * 100, (1 - w) * 100]
