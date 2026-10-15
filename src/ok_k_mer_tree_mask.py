@@ -110,6 +110,39 @@ def _render(tree, outpath, tree_style, width=1500, display=True, dpi=None):
     return outpath
 
 
+def _center_bottom_legend(frame):
+    """Move an ete3 bottom-corner legend to the horizontal center of `frame`."""
+    from ete3.treeview.qt4_face_render import _FaceGroupItem
+    rect = frame.rect()
+    for child in frame.childItems():
+        if isinstance(child, _FaceGroupItem):
+            legend_w, _legend_h = child.get_size()
+            x = rect.left() + max(0.0, (rect.width() - legend_w) / 2.0)
+            child.setPos(x, child.pos().y())
+
+
+def _render_centered_legend(tree, outpath, tree_style, width=1500, dpi=None):
+    """Render like ete3, with the bottom legend centered on the page.
+
+    ete3 only anchors `legend_position` to a corner. The legend item is
+    shifted after layout and before the scene is written, so the tree stays
+    vector and the colorbar sits in the middle of the bottom margin.
+    """
+    from ete3.treeview import drawer
+
+    for nid, node in enumerate(tree.traverse("preorder")):
+        node.add_feature("_nid", nid)
+    scene, img = drawer.init_scene(tree, None, tree_style)
+    frame, n2i, n2f = drawer.render(tree, img)
+    _center_bottom_legend(frame)
+    scene.init_values(tree, img, n2i, n2f)
+    frame.setParentItem(scene.master_item)
+    scene.master_item.setPos(0, 0)
+    scene.addItem(scene.master_item)
+    drawer.save(scene, outpath, w=width, h=None, units="px",
+                dpi=90 if dpi is None else dpi)
+
+
 def _corr_colorbar_face(cmap=plt.cm.YlOrRd, vmin=0.0, vmax=1.0, tmp_path="colorbar_corr.png"):
     """Build an ImgFace colorbar for correlation values."""
     fig, ax = plt.subplots(figsize=(12, 2))
@@ -1022,12 +1055,15 @@ def plot_tree_annotated(tree, node_info, name=None, k_low=6, k_high=40,
     ts.show_scale = False        # entirely remove the branch-length scale bar
     ts.show_leaf_name = False    # leaf names drawn in layout for a larger font
 
-    # Legend: k colorbar. For PNG output it is composited on afterwards so it can
-    # be centered and sized precisely; otherwise fall back to ete3's legend.
-    composite_legend = show_weight and str(outpath).lower().endswith(".png")
+    # Legend: k colorbar. PNG output is composited afterwards so it can be
+    # centered and sized precisely. PDF keeps ete3's legend, then shifts it
+    # to the center of the bottom margin.
+    out_ext = str(outpath).lower()
+    composite_legend = show_weight and out_ext.endswith(".png")
+    pdf_legend = show_weight and out_ext.endswith(".pdf")
     if show_weight and not composite_legend:
         ts.legend.add_face(_k_colorbar_face(k_color), column=0)
-        ts.legend_position = 3  # bottom-left (1=TL, 2=TR, 3=BL, 4=BR)
+        ts.legend_position = 3  # bottom-left; PDF recenters this below
 
     def layout(node):
         nstyle = NodeStyle()
@@ -1080,7 +1116,10 @@ def plot_tree_annotated(tree, node_info, name=None, k_low=6, k_high=40,
 
     ts.layout_fn = layout
     # Render first (no inline display yet); composite the centered legend, then show.
-    _render(tree, outpath, ts, width=width, display=False, dpi=dpi)
+    if pdf_legend:
+        _render_centered_legend(tree, outpath, ts, width=width, dpi=dpi)
+    else:
+        _render(tree, outpath, ts, width=width, display=False, dpi=dpi)
     if composite_legend:
         _paste_centered_legend(outpath, _k_colorbar_png(k_color), dpi=dpi)
     if display and _HAVE_IPYTHON and str(outpath).lower().endswith(".png"):
