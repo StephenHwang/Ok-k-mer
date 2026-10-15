@@ -773,7 +773,7 @@ def plot_3k_grid_joint_corr_weight(name, grid_df, k, s, k_low, k_high, cmap_vmax
 
 ################################################################################
 
-def plot_3k_grid_corr(name, grid_df, k, s, k_low, k_high, cmap_vmax=None, savepath=None, show_title=True):
+def plot_3k_grid_corr(name, grid_df, k, s, k_low, k_high, cmap_vmax=None, savepath=None, show_title=True, show_legend=True):
     """
     Plot one heatmap per k1 in [k−s, …, k+s] (each 35×35, k2 × k3);
     collapse weight dims by min Spearman (matches grid objective), then negate
@@ -782,6 +782,9 @@ def plot_3k_grid_corr(name, grid_df, k, s, k_low, k_high, cmap_vmax=None, savepa
     Tick labels use a smaller font.
     In each subplot, color the best (largest) cell red.
     Across all subplots, color the overall best cell black.
+
+    Args:
+        show_legend: Draw the Spearman correlation colorbar. Default True.
     """
     planes = grid_df.max(axis=(3, 4))  # (n_k1, 35, 35); flip sign so min ρ → positive
     n_k1_full = planes.shape[0]
@@ -874,9 +877,10 @@ def plot_3k_grid_corr(name, grid_df, k, s, k_low, k_high, cmap_vmax=None, savepa
 
     # Move the colorbar (legend) more to the left by reducing the pad
     # You can use the ax argument as a list, but use the 'fraction' and 'pad' kwargs to move it left
-    cbar = fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.9, location="right", label=r"Spearman correlation, $\rho$", pad=0.02)
-    cbar.ax.tick_params(labelsize=13)
-    cbar.set_label(r"Spearman correlation, $\rho$", fontsize=16)
+    if show_legend:
+        cbar = fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.9, location="right", label=r"Spearman correlation, $\rho$", pad=0.02)
+        cbar.ax.tick_params(labelsize=13)
+        cbar.set_label(r"Spearman correlation, $\rho$", fontsize=16)
     _save_figure(fig, savepath)
     plt.show()
 

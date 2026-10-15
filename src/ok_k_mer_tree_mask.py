@@ -138,7 +138,7 @@ def _k_colorbar_png(k_color, tmp_path="colorbar_k.png"):
     norm = plt.cm.colors.BoundaryNorm(bounds, cmap.N)
     cb = plt.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap),
                       ax=ax, orientation="horizontal", ticks=bounds[:-1] + 0.5)
-    cb.set_label("K-mer length")
+    cb.set_label(r"$K$-mer length")
     cb.ax.minorticks_off()  # keep only the integer (per-k) ticks, no sub-ticks
     # Label every other tick so the numbers don't overlap.
     cb.set_ticklabels([str(k) if i % 2 == 0 else "" for i, k in enumerate(ks)])
