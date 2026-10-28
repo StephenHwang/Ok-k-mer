@@ -3,3 +3,8 @@
 /tmp
 slurm*
 __pycache__/
+*.pkl
+*.png
+/bin/tmp/
+/results/
+old_exploration/
