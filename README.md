@@ -9,11 +9,11 @@ The executable and Python package are named `okkmer`.
 Python 3.10 or newer:
 
 ```bash
-python -m pip install '.[plot]'
+python -m pip install .
 okkmer help
 ```
 
-For development use `python -m pip install -e '.[plot]'`.
+For development use `python -m pip install -e .`.
 Dashing2 **v2.1.21** is a separate executable dependency for computing the k-mer 
 Jaccards distanced required by Ok-k-mer. 
 Importing existing distances does not require Dashing2.

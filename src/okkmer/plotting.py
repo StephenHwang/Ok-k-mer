@@ -11,7 +11,7 @@ def pyplot():
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
     except ImportError as exc:
-        raise ValueError('Plotting requires the optional dependency: pip install "okkmer[plot]"') from exc
+        raise ValueError('Matplotlib is missing; reinstall Ok-k-mer with its required dependencies.') from exc
     return plt
 
 
