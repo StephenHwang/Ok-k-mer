@@ -18,7 +18,7 @@ Dashing2 **v2.1.21** is a separate executable dependency for computing the k-mer
 Jaccards distanced required by Ok-k-mer. 
 Importing existing distances does not require Dashing2.
 
-## Preparing an index
+## Building the index
 
 A genome manifest is a TSV with `genome_id` and `path` columns. IDs must match
 Newick leaf labels exactly. Relative paths resolve against the manifest's folder.
@@ -61,7 +61,7 @@ An optional `--genome-map mapping.tsv` maps exact matrix labels to tree IDs
 with `source_id` and `genome_id` columns. No accession prefix/version changes
 are inferred by the tool.
 
-## Search
+## Ok-k-mer search
 
 ```bash
 okkmer search --tree reference.nwk --index my_index --global \
@@ -120,7 +120,7 @@ so stages after the first non-improving stage are not evaluated. Full
 weight-specific scores can be saved with `--save-grid` (potentially large).
 Outputs must be new or empty directories; existing results are protected.
 
-## Plot
+## Ok-k-mer plotting
 
 ```bash
 okkmer plot heatmap --results search_results --ensemble-size 1 --output single.pdf
