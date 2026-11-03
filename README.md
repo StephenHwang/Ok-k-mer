@@ -1,10 +1,10 @@
-# Ok-k-mer
+# Ok-k-mer: Selecting k-mer length ensembles for calculating genomic distance
 
-Ok-k-mer selects weighted ensembles of k-mer lengths whose pairwise genomic
-distance ranks best agree with distances in a reference phylogeny.
+Ok-k-mer selects weighted ensembles of k-mer lengths for improving pairwise genomic
+distance comparisons across a phylogenetic tree.
 The executable and Python package are named `okkmer`.
 
-## Install
+## Installation
 
 Python 3.10 or newer:
 
@@ -14,14 +14,11 @@ okkmer help
 ```
 
 For development use `python -m pip install -e '.[plot]'`.
-Dashing2 **v2.1.21** (or the manuscript benchmark revision
-`72d16c72fdb43f37cff06f8a13c94b7fdc9d29af`) is a separate executable dependency only when computing
-an index from genomes. Importing existing distances does not require Dashing2.
-The executable must be runnable in your environment; the benchmark build on
-Rockfish requires `module load GCC/11.3.0`.
-The plotting extra uses Matplotlib and does not require a graphical desktop.
+Dashing2 **v2.1.21** is a separate executable dependency for computing the k-mer 
+Jaccards distanced required by Ok-k-mer. 
+Importing existing distances does not require Dashing2.
 
-## Prepare an index
+## Preparing an index
 
 A genome manifest is a TSV with `genome_id` and `path` columns. IDs must match
 Newick leaf labels exactly. Relative paths resolve against the manifest's folder.
@@ -38,13 +35,13 @@ okkmer index --genomes genomes.tsv --k-low 6 --k-high 40 \
     --threads 8 --output my_index
 ```
 
-This invokes Dashing2 with `dist --set --long-kmers --square` for each k,
+This runs Dashing2 with `dist --set --long-kmers --square` for each k,
 normalizes similarity to Jaccard distance, and records versions, commands,
-input hashes, and genome IDs. Successful invocations remove their own private
-intermediate sets. Raw similarity matrices and stderr logs are retained.
+input hashes, and genome IDs. Raw similarity matrices and stderr logs are 
+retained.
 
-Alternatively, import a TSV/CSV containing `genome_1`, `genome_2`, and `k6`,
-`k7`, ... columns (the legacy names `k6_distance`, etc. are also accepted):
+Alternatively, use a TSV/CSV containing `genome_1`, `genome_2`, and `k6`,
+`k7`, ... columns:
 
 ```bash
 okkmer index --distances distances.tsv --input-kind distance \
@@ -84,8 +81,9 @@ okkmer search --tree reference.nwk --index my_index --local 3 \
     -n 3 --output local_results
 ```
 
-`--local` without a number uses 3. `--global` and `--local` are mutually exclusive.
-`-n` is the maximum number of distinct lengths, not a guarantee of that many.
+`--local` without a number uses +-3 k-mer. `--global` and `--local` are mutually 
+exclusive.
+`-n` is the maximum number of k-mers checked in the k-mer ensembles.
 Search stops when another length fails to improve rho by more than
 `--improvement-tol` (default 1e-12).
 
