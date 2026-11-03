@@ -199,3 +199,31 @@ Regression checks (small synthetic grids, mocked submission; no jobs scheduled):
 /home/shwang45/miniconda3/envs/python310/bin/python -m unittest discover \
   -s bin/stability -p 'test_stability.py' -v
 ```
+
+## Anaerolineales and Dethiobacteria (October 2026)
+
+`add_datasets.py prepare` validates all 35 square Jaccard distance matrices
+against the tree accessions and writes inputs under
+`results/new_datasets_20261028`. It negates distances so the existing
+similarity-oriented minimization and sign-flipped reporting remain equivalent
+to maximizing distance concordance, without subtractive rounding.
+The manifest copies the original experiment's fractions and search settings.
+The `2k` manifest has only the two unmasked baselines; `3k` has all replicates.
+Submit each with `stability.py submit --manifest PATH --max-concurrent 24`.
+
+After both arrays finish, `add_datasets.py collect` produces Table 2/A1 data in
+`table2_and_A1.csv`, first-three-trial rows for all fractions in
+`table3_all_fractions.csv`, and Fig 4/A1 plots under `3k/` (Spearman and effective
+weighted k, respectively). Raw correlations in simulation CSVs retain the
+original negative convention; comparison-table rhos and plots are positive.
+The manuscript is never modified. `collect_new_datasets.sh` can be submitted
+with an `afterok` dependency on both arrays for automatic export.
+
+The confirmed Anaerolineales mappings are recorded alongside its merged CSV.
+Dethiobacteria explicitly excludes `GCF_000174415.1` and `GCF_022558445.1`
+from both comparisons and the masking population (102 genomes). Its original
+104-leaf tree is read unchanged; retained distances are calculated on that tree.
+Unexpected missing genomes still fail validation. The collector also combines
+original and new simulations into eight-dataset Fig 4/A1 PDFs and PNGs (0–60%,
+matching the manuscript), plus first-three-trial CSVs for all fractions and 30%.
+The full simulation run retains the original 0–70% experimental range.

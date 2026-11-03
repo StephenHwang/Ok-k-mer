@@ -27,9 +27,13 @@ def digest(path):
     return h.hexdigest()
 
 
-def mask_pairs(tree, df, fraction, seed):
+def mask_pairs(tree, df, fraction, seed, excluded_genomes=()):
     """Same leaf order, floor rounding, RNG and pair removal as mask_genomes."""
     leaves = tree.get_leaf_names()
+    excluded = set(excluded_genomes)
+    if not excluded <= set(leaves):
+        raise ValueError("Excluded genomes are not in the tree")
+    leaves = [name for name in leaves if name not in excluded]
     if len(set(leaves)) != len(leaves):
         raise ValueError("Tree contains duplicate leaf names")
     names = set(df.genome_1) | set(df.genome_2)
@@ -64,6 +68,7 @@ def canonical_recommendation(ks, weights):
 def main(max_k):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--tree-path", required=True)
+    p.add_argument("--exclude-genomes", nargs="*", default=[])
     source = p.add_mutually_exclusive_group(required=True)
     source.add_argument("--dir-path", help="Original distance_k*.txt input")
     source.add_argument("--merged-csv", help="Notebook's cached merged dataframe")
@@ -106,8 +111,9 @@ def main(max_k):
     columns = ["tree_distance"] + [f"k{k}_distance" for k in range(args.k_low, args.k_high + 1)]
     if not np.isfinite(df[columns].to_numpy(dtype=float)).all():
         raise ValueError("Input contains missing/non-finite distances")
-    sub, masked = mask_pairs(tree, df, args.masking_fraction, args.seed)
-    print(f"{args.dataset}: masked {len(masked)}/{len(tree)} genomes; retained {len(sub)} pairs", flush=True)
+    sub, masked = mask_pairs(tree, df, args.masking_fraction, args.seed, args.exclude_genomes)
+    n_genomes = len(tree) - len(set(args.exclude_genomes))
+    print(f"{args.dataset}: masked {len(masked)}/{n_genomes} genomes; retained {len(sub)} pairs", flush=True)
     extra = {}
     if max_k == 2:
         tensor, rho, k1, k2, w1, _ = original.run_full_grid_corr(
@@ -131,8 +137,9 @@ def main(max_k):
         "dataset": args.dataset, "max_k": max_k, "simulation": args.simulation,
         "masking_fraction": args.masking_fraction, "masking_percentage": args.masking_fraction * 100,
         "seed": args.seed, "masked_genomes": masked,
-        "n_genomes": len(tree), "n_masked": len(masked), "n_retained": len(tree) - len(masked),
-        "actual_masking_fraction": len(masked) / len(tree), "n_pairs": len(sub),
+        "excluded_genomes": args.exclude_genomes, "n_tree_genomes": len(tree),
+        "n_genomes": n_genomes, "n_masked": len(masked), "n_retained": n_genomes - len(masked),
+        "actual_masking_fraction": len(masked) / n_genomes, "n_pairs": len(sub),
         "correlation": float(rho), "raw_ks": [int(k) for k in ks],
         "raw_weights": [float(w) for w in weights], **canonical_recommendation(ks, weights), **extra,
         "tree_path": str(Path(args.tree_path).resolve()),

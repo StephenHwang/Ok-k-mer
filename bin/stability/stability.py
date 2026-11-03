@@ -156,6 +156,8 @@ def run_task(args):
                 "k_low", "k_high", "w_step", "s", "json_out"]:
         cmd += [f"--{key.replace('_', '-')}", str(row[key])]
     cmd += ["--threads", os.environ.get("SLURM_CPUS_PER_TASK", "1")]
+    if row.get("excluded_genomes"):
+        cmd += ["--exclude-genomes", *row["excluded_genomes"]]
     if row["save_tensor"]:
         cmd += ["--save-npy", str(Path(row["json_out"]).with_suffix(".npy"))]
     subprocess.run(cmd, check=True)
