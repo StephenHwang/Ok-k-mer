@@ -36,8 +36,9 @@ Differences below are new minus legacy rho:
 | Cyanobacteriales | two | -3.52e-11 |
 | Cyanobacteriales | three | -5.72e-12 |
 
-The report is `results/cli_validation.json` in this checkout. Reproduce it with
-`experiments/manuscript/workflows/validate_legacy.py` and a new output path.
+The report moved to `../ok_k_mer_experiments/results/cli_validation.json`.
+Reproduce it using `workflows/validate_legacy.py` in that separate repository
+and a new output path.
 These small differences reflect the explicitly changed tie/weight arithmetic
 and source preprocessing; source trees can also differ slightly in floating
 point summation from cached tree-distance columns. See `compatibility.md`.

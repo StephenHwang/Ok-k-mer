@@ -1,8 +1,11 @@
 # Scientific compatibility and migration
 
 The new package implements the method described in manuscript Section 4.5.
-Legacy experiment scripts remain in their original locations to preserve paths,
-input hashes, and provenance. They do not import the new package implicitly.
+Legacy experiment scripts now live in the separate sibling repository
+`ok_k_mer_experiments`. Script paths in this document are relative to that
+repository. Historical run records retain their original values and paths;
+the experiment manifest reader resolves the pre-split root in memory. Legacy
+searches do not import the new package implicitly.
 
 ## Objective and ties
 

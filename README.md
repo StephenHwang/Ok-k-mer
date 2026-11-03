@@ -148,10 +148,11 @@ mode `--local` refers to k neighborhoods, independently of subtree annotation.
 
 ## Manuscript experiments and development
 
-Reusable code lives in `src/okkmer/`. The original `src/ok_k_mer*.py`, notebooks,
-`bin/`, and existing results remain the legacy experiment implementations.
-[experiments/manuscript](experiments/manuscript/README.md) catalogs those workflows
-and provides explicit dataset configurations for the new CLI. See
+Reusable code lives in `src/okkmer/`, with package tests under `tests/`.
+Manuscript workflows, legacy analysis code, notebooks, dataset configurations,
+and results live in the separate **`ok_k_mer_experiments`** repository, located
+alongside this checkout at `../ok_k_mer_experiments`. Its README documents the
+experiment entry points and data locations. See
 [docs/compatibility.md](docs/compatibility.md) before comparing old and new scores.
 
 ```bash

@@ -1,16 +1,9 @@
-/data
-/log
-/tmp
-slurm*
 __pycache__/
-*.pkl
-*.png
-/bin/tmp/
-/results/
-old_exploration/
-
-# Python package build artifacts
+*.py[cod]
 /build/
 /dist/
 *.egg-info/
 .venv/
+.pytest_cache/
+.coverage
+htmlcov/
