@@ -8,3 +8,9 @@ __pycache__/
 /bin/tmp/
 /results/
 old_exploration/
+
+# Python package build artifacts
+/build/
+/dist/
+*.egg-info/
+.venv/

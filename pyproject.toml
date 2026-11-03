@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "okkmer"
+version = "0.1.0"
+description = "Select weighted ensembles of k-mer lengths against a reference phylogeny"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.23", "scipy>=1.9", "ete3>=3.1.3", "six>=1.16"]
+
+[project.optional-dependencies]
+plot = ["matplotlib>=3.6"]
+
+[project.scripts]
+okkmer = "okkmer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["okkmer*"]
