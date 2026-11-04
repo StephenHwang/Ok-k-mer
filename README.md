@@ -85,7 +85,9 @@ okkmer search --tree reference.nwk --index my_index --local 3 \
 exclusive.
 `-n` is the maximum number of k-mers checked in the k-mer ensembles.
 Search stops when another length fails to improve rho by more than
-`--improvement-tol` (default 1e-12).
+`--improvement-tol` (default 1e-12). Use `--no-early-stop` to evaluate every
+ensemble size through `--max-kmers` even when an intermediate stage fails to
+improve rho. The final recommendation still retains the best ensemble found.
 
 Exactly m-length candidates have m distinct k values, all with positive weights
 on the specified grid summing to one. Zero-weight boundaries are represented

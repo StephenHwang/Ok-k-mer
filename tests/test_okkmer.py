@@ -69,6 +69,29 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(reason,'no_improvement')
 
 
+    def test_no_early_stop_evaluates_triples_and_keeps_smaller_winner(self):
+        d=np.arange(8.)
+        stages,winner,reason=optimize(np.column_stack([d,d,d]),d,[6,7,8],3,.25,
+                                      stop_on_no_improvement=False)
+        self.assertEqual([s['size'] for s in stages],[1,2,3])
+        self.assertEqual(winner['ensemble_size'],1)
+        self.assertEqual(reason,'max_kmers_reached')
+        self.assertEqual(stages[2]['rows'][0]['ks'],[6,7,8])
+
+
+    def test_four_length_stage_matches_scipy(self):
+        rng=np.random.default_rng(51)
+        distances=rng.random((15,4))
+        target=rng.random(15)
+        stages,_,_=optimize(distances,target,[6,7,8,9],4,.25,
+                            stop_on_no_improvement=False)
+        best=stages[-1]['best']
+        self.assertEqual(best['ks'],[6,7,8,9])
+        self.assertEqual(best['weights'],[.25,.25,.25,.25])
+        composite=sum(rankdata(distances[:,i],method='average') for i in range(4))
+        self.assertAlmostEqual(best['rho'],spearmanr(composite,target).statistic,places=14)
+
+
 class CLITests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()

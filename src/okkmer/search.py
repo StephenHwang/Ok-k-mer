@@ -40,7 +40,7 @@ def estimate(ks, maximum, denominator):
             for size in range(1,maximum+1)}
 
 
-def optimize(distances, target, ks, maximum, step, delta=None, threads=1, tolerance=1e-12, grid_directory=None):
+def optimize(distances, target, ks, maximum, step, delta=None, threads=1, tolerance=1e-12, grid_directory=None, stop_on_no_improvement=True):
     scorer = Scorer(distances, target)
     lookup = {k:i for i,k in enumerate(ks)}
     denominator = weight_denominator(step)
@@ -86,10 +86,13 @@ def optimize(distances, target, ks, maximum, step, delta=None, threads=1, tolera
         for row in rows:
             row['gap_to_stage_best'] = best['rho']-row['rho']
         stages.append({'size':size,'rows':rows,'best':best})
-        if winner is not None and best['rho'] <= winner['rho']+tolerance:
+        improves = winner is None or best['rho'] > winner['rho']+tolerance
+        if not improves and stop_on_no_improvement:
             reason = 'no_improvement'
             break
-        winner, previous = best, best['ks']
+        if improves:
+            winner = best
+        previous = best['ks']
     return stages, winner, reason
 
 
@@ -156,7 +159,7 @@ def run(args):
     if args.dry_run:
         return
     out = new_directory(args.output)
-    stages,winner,reason = optimize(distances,target,ks,args.max_kmers,args.w_step,args.local,args.threads,args.improvement_tol,out if args.save_grid else None)
+    stages,winner,reason = optimize(distances,target,ks,args.max_kmers,args.w_step,args.local,args.threads,args.improvement_tol,out if args.save_grid else None, not args.no_early_stop)
     summary = save_search(out,stages,winner,reason)
     node_rows = []
     if args.annotate_nodes:
@@ -174,7 +177,7 @@ def run(args):
                     row.update(status='constant_tree_distances',recommendation=None)
                 else:
                     try:
-                        ns,nw,nr = optimize(distances[mask],target[mask],ks,args.max_kmers,args.w_step,args.local,args.threads,args.improvement_tol)
+                        ns,nw,nr = optimize(distances[mask],target[mask],ks,args.max_kmers,args.w_step,args.local,args.threads,args.improvement_tol,stop_on_no_improvement=not args.no_early_stop)
                     except ValueError as exc:
                         if not str(exc).startswith('No defined correlations'):
                             raise
@@ -198,7 +201,7 @@ def run(args):
            'tree_path':str(Path(args.tree).resolve()),'tree_sha256':digest(args.tree),
            'index_path':str(Path(args.index).resolve()),'index_manifest_sha256':digest(Path(args.index)/'manifest.json'),
            'mode':'global' if args.local is None else 'local','delta_k':args.local,'ks':ks,'max_kmers':args.max_kmers,
-           'w_step':args.w_step,'save_grid':args.save_grid,'threads':args.threads,'improvement_tol':args.improvement_tol,
+           'early_stopping':not args.no_early_stop,'w_step':args.w_step,'save_grid':args.save_grid,'threads':args.threads,'improvement_tol':args.improvement_tol,
            'excluded_genomes':sorted(exclusions),'n_genomes':len(set(a)|set(b)), 'n_pairs':len(target),
            'candidate_weight_upper_bounds':estimates,'rank_ties':'average','score':'spearman_distance',**summary}
     write_json(out/'run.json',run)
