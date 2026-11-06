@@ -88,22 +88,22 @@ Without an input integer, `--local` defaults to use +-3 k-mer.
 `--global` and `--local` are mutually exclusive.
 `-n` is the maximum number of k-mers checked in the k-mer ensembles.
 
-Ok-k-mer's search stops when another length fails to improve rho by more than
-`--improvement-tol` (default 1e-12). Use `--no-early-stop` to evaluate every
-ensemble size through `--max-kmers` even when an intermediate stage fails to
-improve rho. The final recommendation still retains the best ensemble found.
+Ok-k-mer's search stops when another length fails to improve rho by more than 
+some tolerance, `--improvement-tol` (default 1e-12).
+Use `--no-early-stop` to evaluate every ensemble size through `--max-kmers` even 
+when an intermediate stage fails to improve rho. 
+The final recommendation still retains the best ensemble found.
 
-Exactly m-length candidates have m distinct k values, all with positive weights
-on the specified grid summing to one. Zero-weight boundaries are represented
-by earlier search stages. The weight step must divide 1 exactly; m cannot
-exceed the number of requested lengths or 1/w-step.
+For an ensemble of m k-mers, each k-mer will have a distinct length k and a positive weight. 
+The weights sum to one.
+Zero-weight boundaries are represented by earlier search stages. 
 
 The objective is Spearman correlation between reference branch distances and
-the weighted sum of per-k Jaccard-distance ranks. Both ranking steps use average
-ranks for ties. Integer coefficients preserve exact weighted-score ties.
-Correlations are signed; larger is better. Ties choose lexicographically smaller
-k combinations and then weight coefficients. Constant genomic score vectors
-are skipped; constant reference distances are rejected.
+the weighted sum of per-k Jaccard-distance ranks. 
+Both ranking steps use average ranks for ties. 
+Integer coefficients preserve exact weighted-score ties.
+Correlations are signed; a larger correlation is better. 
+Ties choose lexicographically smaller k combinations and then weight coefficients.
 
 Genomes must match the tree exactly. For deliberate omissions provide
 `--exclude-genomes excluded.txt`, with one exact ID per line. Exclusions affect
@@ -121,9 +121,9 @@ Outputs:
 - `reference.nwk`: a bundled copy for plotting.
 
 The `ks` and `weights` table cells contain JSON arrays. Undefined combinations
-are omitted. Local outputs cover only visited combinations. Search stops early,
-so stages after the first non-improving stage are not evaluated. Full
-weight-specific scores can be saved with `--save-grid` (potentially large).
+are omitted. Local outputs cover only visited combinations. 
+Searches may stop early, so stages after the first non-improving stage are not evaluated. 
+Full weight-specific scores can be saved with `--save-grid`.
 Outputs must be new or empty directories; existing results are protected.
 
 ## Ok-k-mer plotting
