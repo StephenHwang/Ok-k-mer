@@ -19,9 +19,12 @@ Jaccards distanced required by Ok-k-mer.
 Importing existing distances does not require Dashing2.
 
 ## Building the index
-
-A genome manifest is a TSV with `genome_id` and `path` columns. IDs must match
-Newick leaf labels exactly. Relative paths resolve against the manifest's folder.
+Ok-k-mer performs it's k-mer ensemble search over pairwise genomic distances 
+from genomes of a phylogenetic tree.
+To specify the input genome, a genome manifest is needed.
+A genome manifest is a TSV with `genome_id` and `path` columns. 
+IDs must match the input reference tree genomes.
+Relative paths resolve against the manifest's folder.
 
 ```text
 genome_id	path
@@ -29,18 +32,17 @@ genome_A	genomes/A.fna
 genome_B	genomes/B.fna
 genome_C	genomes/C.fna
 ```
-
+By default, Ok-k-mer uses Dashing2 to compute the starting pairwise genomic distances.
 ```bash
 okkmer index --genomes genomes.tsv --k-low 6 --k-high 40 \
     --threads 8 --output my_index
 ```
 
-This runs Dashing2 with `dist --set --long-kmers --square` for each k,
-normalizes similarity to Jaccard distance, and records versions, commands,
-input hashes, and genome IDs. Raw similarity matrices and stderr logs are 
-retained.
+This runs Dashing2 with `dist --set --long-kmers --square` for each k
+and records versions, commands, input hashes, and genome IDs. 
+Raw similarity matrices and stderr logs are retained.
 
-Alternatively, use a TSV/CSV containing `genome_1`, `genome_2`, and `k6`,
+Alternatively, Ok-k-mer can use a TSV/CSV containing `genome_1`, `genome_2`, and `k6`,
 `k7`, ... columns:
 
 ```bash
@@ -48,11 +50,10 @@ okkmer index --distances distances.tsv --input-kind distance \
     --k-low 6 --k-high 40 --output my_index
 ```
 
-Every unordered genome pair must appear exactly once. Values must be finite
-and in [0,1]. Use `--input-kind similarity` for Jaccard similarities, including
-legacy experiment CSVs whose `*_distance` columns actually contain similarities.
-Other metadata columns are ignored. Distances from metrics other than Jaccard
-are not supported by this first index schema.
+Every unordered genome pair must appear exactly once. Values must be finite and in [0,1]. 
+Use `--input-kind similarity` for Jaccard similarities, including
+legacy CSVs whose `*_distance` columns contain similarities. 
+Jaccard similarity is complementary to Jaccard distance: `distance = 1 - similarity`.
 
 For Dashing2 square TSVs, pass their directory to `--distances`. Distance
 files must be named `jaccard_k6.tsv`, etc.; similarity files must be named
@@ -146,8 +147,8 @@ or constant distances are marked unscorable.
 mode `--local` refers to k neighborhoods, independently of subtree annotation.
 
 ## Citing Ok-k-mer and reproducing results
-Scripts, experiements, notebooks to reproduce the results are found in this separate repo:
-[**`ok_k_mer_experiments`** repository](https://github.com/StephenHwang/Ok-k-mer_Experiments).
+Scripts, experiements, notebooks to reproduce the results are found in a separate repo:
+[`ok_k_mer_experiments`](https://github.com/StephenHwang/Ok-k-mer_Experiments).
 
 Preprint: **in-progress**
 
