@@ -158,3 +158,9 @@ experiment entry points and data locations. See
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
+
+## License
+
+Ok-k-mer is licensed under the GNU General Public License version 3
+(`GPL-3.0-only`). See [LICENSE](LICENSE) for the full terms.
+Third-party components and data retain their respective licenses.
