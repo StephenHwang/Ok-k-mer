@@ -69,7 +69,8 @@ are inferred by the tool.
 Ok-*k*-mer searches for ensembles of *k*-mers and weights that maximize agreeement of 
 pariwise distance relationships to a phylogenetic tree.
 
-Global search is the default. *k* bounds are inclusive. Every requested *k* must
+Global search is the default.  
+*k* bounds are inclusive. Every requested *k* must
 exist in the index. Add `--dry-run` to validate inputs and report candidate
 counts before computation; no output directory is created.
 
@@ -167,5 +168,5 @@ If you run into any issues or have any questions, reach out either through:
 
 
 ## License
-Ok-*k*-mer is licensed under the GNU General Public License version 3 (`GPL-3.0-only`).  
+Ok-*k*-mer is licensed under the GNU General Public License version 3.  
 See [LICENSE](LICENSE) for the full terms.
