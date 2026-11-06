@@ -14,7 +14,7 @@ okkmer help
 ```
 
 For development use `python -m pip install -e .`.
-Dashing2 **v2.1.21** is a separate executable dependency for computing the k-mer 
+[Dashing2 **v2.1.21**](https://github.com/dnbaker/dashing2/releases/tag/v2.1.21) is a separate executable dependency for computing the k-mer
 Jaccards distanced required by Ok-k-mer. 
 Importing existing distances does not require Dashing2.
 
@@ -63,16 +63,18 @@ with `source_id` and `genome_id` columns. No accession prefix/version changes
 are inferred by the tool.
 
 ## Ok-k-mer search
+Ok-k-mer searches for ensembles of k-mers and weights that maximize agreeement of 
+pariwise distance relationships to a phylogenetic tree.
+
+Global search is the default. K bounds are inclusive. Every requested k must
+exist in the index. Add `--dry-run` to validate inputs and report candidate
+counts before computation; no output directory is created.
 
 ```bash
 okkmer search --tree reference.nwk --index my_index --global \
     --max-kmers 3 --k-low 6 --k-high 40 --w-step 0.05 \
     --threads 8 --output search_results
 ```
-
-Global search is the default. K bounds are inclusive. Every requested k must
-exist in the index. Add `--dry-run` to validate inputs and report candidate
-counts before computation; no output directory is created.
 
 Local search varies **each** previously selected length within ±DELTA_K,
 while the additional length spans the complete requested range:
@@ -82,10 +84,11 @@ okkmer search --tree reference.nwk --index my_index --local 3 \
     -n 3 --output local_results
 ```
 
-`--local` without a number uses +-3 k-mer. `--global` and `--local` are mutually 
-exclusive.
+Without an input integer, `--local` defaults to use +-3 k-mer. 
+`--global` and `--local` are mutually exclusive.
 `-n` is the maximum number of k-mers checked in the k-mer ensembles.
-Search stops when another length fails to improve rho by more than
+
+Ok-k-mer's search stops when another length fails to improve rho by more than
 `--improvement-tol` (default 1e-12). Use `--no-early-stop` to evaluate every
 ensemble size through `--max-kmers` even when an intermediate stage fails to
 improve rho. The final recommendation still retains the best ensemble found.
