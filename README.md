@@ -13,10 +13,11 @@ python -m pip install .
 okkmer help
 ```
 
-For development use `python -m pip install -e .`.
 [Dashing2 **v2.1.21**](https://github.com/dnbaker/dashing2/releases/tag/v2.1.21) is a separate executable dependency for computing the k-mer
 Jaccards distanced required by Ok-k-mer. 
 Importing existing distances does not require Dashing2.
+
+For development use `python -m pip install -e .`.
 
 ## Building the index
 Ok-k-mer performs it's k-mer ensemble search over pairwise genomic distances 
@@ -55,9 +56,11 @@ Use `--input-kind similarity` for Jaccard similarities, including
 legacy CSVs whose `*_distance` columns contain similarities. 
 Jaccard similarity is complementary to Jaccard distance: `distance = 1 - similarity`.
 
-For Dashing2 square TSVs, pass their directory to `--distances`. Distance
-files must be named `jaccard_k6.tsv`, etc.; similarity files must be named
-`jaccard_similarity_k6.tsv`, etc. The `#Sources` header and row labels must agree.
+For Dashing2 square TSVs, pass their directory to `--distances`. 
+Distance files must be named `jaccard_k*.tsv`.
+Similarity files must be named `jaccard_similarity_k*.tsv`. 
+
+The `#Sources` header and row labels must agree.
 An optional `--genome-map mapping.tsv` maps exact matrix labels to tree IDs
 with `source_id` and `genome_id` columns. No accession prefix/version changes
 are inferred by the tool.
@@ -150,15 +153,17 @@ or constant distances are marked unscorable.
 mode `--local` refers to k neighborhoods, independently of subtree annotation.
 
 ## Citing Ok-k-mer and reproducing results
+Preprint: **in-progress**
+
 Scripts, experiements, notebooks to reproduce the results are found in a separate repo:
 [`ok_k_mer_experiments`](https://github.com/StephenHwang/Ok-k-mer_Experiments).
 
-Preprint: **in-progress**
 
 ## Getting help
 If you run into any issues or have any questions, reach out either through:
 (1) GitHub Issues or 
 (2) shwang45 [at] jhu.edu
+
 
 ## License
 Ok-k-mer is licensed under the GNU General Public License version 3
