@@ -68,8 +68,9 @@ are inferred by the tool.
 ## Ok-*k*-mer search
 Ok-*k*-mer searches for ensembles of *k*-mers and weights that maximize agreeement of 
 pariwise distance relationships to a phylogenetic tree.
+Ok-*k*-mer search has two modes, `--global` and `--local`. These are mutually exclusive.
+Global search is the default.
 
-Global search is the default.  
 *k* bounds are inclusive. Every requested *k* must
 exist in the index. Add `--dry-run` to validate inputs and report candidate
 counts before computation; no output directory is created.
