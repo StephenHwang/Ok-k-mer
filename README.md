@@ -123,44 +123,40 @@ weight-specific scores can be saved with `--save-grid` (potentially large).
 Outputs must be new or empty directories; existing results are protected.
 
 ## Ok-k-mer plotting
+Ok-k-mer provides two plotting functions: `heatmap` and `tree`.
 
+Heatmaps show the best rho over weights. Three-length plots require a fixed-k
+slice. Gray entries are unsearched, undefined, or repeated lengths.
 ```bash
 okkmer plot heatmap --results search_results --ensemble-size 1 --output single.pdf
 okkmer plot heatmap --results search_results --ensemble-size 2 --output pairs.pdf
 okkmer plot heatmap --results search_results --ensemble-size 3 --fixed-k 20 --output triples.pdf
 ```
 
-Heatmaps show the best rho over weights. Three-length plots require a fixed-k
-slice. Gray entries are unsearched, undefined, or repeated lengths.
-
 To annotate internal tree nodes, first compute their recommendations:
-
 ```bash
 okkmer search --tree reference.nwk --index my_index -n 3 \
     --annotate-nodes --output annotated_results
 okkmer plot tree --results annotated_results --output annotated_tree.pdf
 ```
 
-This repeats optimization per internal node and may take much longer. Nodes
-with fewer than three genomes or constant distances are marked unscorable.
+This repeats optimization per internal node. Nodes with fewer than three genomes 
+or constant distances are marked unscorable.
 `nodes.json`, `nodes.tsv`, and per-node combination tables are saved. Search
 mode `--local` refers to k neighborhoods, independently of subtree annotation.
 
-## Manuscript experiments and development
+## Citing Ok-k-mer and reproducing results
+Scripts, experiements, notebooks to reproduce the results are found in this separate repo:
+[**`ok_k_mer_experiments`** repository](https://github.com/StephenHwang/Ok-k-mer_Experiments).
 
-Reusable code lives in `src/okkmer/`, with package tests under `tests/`.
-Manuscript workflows, legacy analysis code, notebooks, dataset configurations,
-and results live in the separate **`ok_k_mer_experiments`** repository, located
-alongside this checkout at `../ok_k_mer_experiments`. Its README documents the
-experiment entry points and data locations. See
-[docs/compatibility.md](docs/compatibility.md) before comparing old and new scores.
+Preprint: **in-progress**
 
-```bash
-PYTHONPATH=src python -m unittest discover -s tests -v
-```
+## Getting help
+If you run into any issues or have any questions, reach out either through:
+(1) GitHub Issues or 
+(2) shwang45 [at] jhu.edu
 
 ## License
-
 Ok-k-mer is licensed under the GNU General Public License version 3
 (`GPL-3.0-only`). See [LICENSE](LICENSE) for the full terms.
 Third-party components and data retain their respective licenses.
