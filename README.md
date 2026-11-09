@@ -1,7 +1,8 @@
 # Ok-*k*-mer: Selecting *k*-mer length ensembles for calculating genomic distance
 
-Ok-*k*-mer selects weighted ensembles of *k*-mer lengths for improving pairwise genomic
-distance comparisons across a phylogenetic tree.
+Ok-*k*-mer selects weighted ensembles of *k*-mer lengths for calculating pairwise genomic
+distances across a phylogenetic tree.
+
 The executable and Python package are named `okkmer`.
 
 ## Installation
@@ -15,17 +16,19 @@ okkmer help
 
 [Dashing2 **v2.1.21**](https://github.com/dnbaker/dashing2/releases/tag/v2.1.21) is a separate executable dependency for computing the *k*-mer
 Jaccards distanced required by Ok-*k*-mer. 
-Importing existing distances does not require Dashing2.
+Distance matrices computed by other tools can be imported and used by Ok-*k*-mer. 
 
 For development use `python -m pip install -e .`.
 
 ## Building the index
-Ok-*k*-mer performs it's *k*-mer ensemble search over pairwise genomic distances 
+Ok-*k*-mer performs it's *k*-mer length ensemble search over pairwise genomic distances 
 from genomes of a phylogenetic tree.
 To specify the input genome, a genome manifest is needed.
-A genome manifest is a TSV with `genome_id` and `path` columns. 
+A genome manifest is a TSV with `genome_id` and `path` columns, where
 IDs must match the input reference tree genomes.
-Relative paths resolve against the manifest's folder.
+
+Relative genome paths are interpreted relative to the folder containing the genome manifest,
+not where `okkmer` is ran. Absolute paths are used directly.
 
 ```text
 genome_id	path
@@ -66,14 +69,13 @@ with `source_id` and `genome_id` columns. No accession prefix/version changes
 are inferred by the tool.
 
 ## Ok-*k*-mer search
-Ok-*k*-mer searches for ensembles of *k*-mers and weights that maximize agreeement of 
+Ok-*k*-mer searches for ensembles of *k*-mer lengths and weights that maximize agreeement of 
 pariwise distance relationships to a phylogenetic tree.
 Ok-*k*-mer search has two modes, `--global` and `--local`. These are mutually exclusive.
 Global search is the default.
 
-*k* bounds are inclusive. Every requested *k* must
-exist in the index. Add `--dry-run` to validate inputs and report candidate
-counts before computation; no output directory is created.
+The bounds on *k* are inclusive and every requested *k* must exist in the index. 
+Add `--dry-run` to validate inputs and report candidate counts before computation; no output directory is created.
 
 ```bash
 okkmer search --tree reference.nwk --index my_index --global \
@@ -91,19 +93,20 @@ okkmer search --tree reference.nwk --index my_index --local 3 \
 
 Without an input integer, `--local` defaults to use +-3 *k*-mer. 
 `--global` and `--local` are mutually exclusive.
-`-n` is the maximum number of *k*-mers checked in the *k*-mer ensembles.
+`-n/--max-kmers` is the maximum number of *k*-mers checked in the *k*-mer ensembles.
 
-Ok-*k*-mer's search stops when another length fails to improve rho by more than 
-some tolerance, `--improvement-tol` (default 1e-12).
+Ok-*k*-mer's search stops searching for additional *k*-mers, or up to `--max-kmers`, 
+when another length fails to improve ρ by more than some tolerance,
+`--improvement-tol` (default 1e-12).
 Use `--no-early-stop` to evaluate every ensemble size through `--max-kmers` even 
-when an intermediate stage fails to improve rho. 
+when an intermediate stage fails to improve ρ. 
 The final recommendation still retains the best ensemble found.
 
 For an ensemble of *m* *k*-mers, each *k*-mer will have a distinct length *k* and a positive weight. 
 The weights sum to one.
 Zero-weight boundaries are represented by earlier search stages. 
 
-The objective is Spearman correlation between reference branch distances and
+The objective is Spearman correlation, ρ, between reference branch distances and
 the weighted sum of per-*k* Jaccard-distance ranks. 
 Both ranking steps use average ranks for ties. 
 Integer coefficients preserve exact weighted-score ties.
@@ -122,7 +125,7 @@ Outputs:
   identifies the final recommendation. The last stage may not improve it.
 - `single_k.tsv`: single-length scores.
 - `combinations_2.tsv`, `combinations_3.tsv`, ...: one row per evaluated distinct
-  combination, including its best weights, rho, and gap from that stage's best.
+  combination, including its best weights, ρ, and gap from that stage's best.
 - `reference.nwk`: a bundled copy for plotting.
 
 The `ks` and `weights` table cells contain JSON arrays. Undefined combinations
@@ -134,7 +137,7 @@ Outputs must be new or empty directories; existing results are protected.
 ## Ok-*k*-mer plotting
 Ok-*k*-mer provides two plotting functions: `heatmap` and `tree`.
 
-Heatmaps show the best rho over weights. Three-length plots require a fixed-*k*
+Heatmaps show the best ρ over weights. Three-length plots require a fixed-*k*
 slice. Gray entries are unsearched, undefined, or repeated lengths.
 ```bash
 okkmer plot heatmap --results search_results --ensemble-size 1 --output single.pdf
@@ -155,7 +158,7 @@ or constant distances are marked unscorable.
 mode `--local` refers to *k* neighborhoods, independently of subtree annotation.
 
 ## Citing Ok-*k*-mer and reproducing results
-Preprint: **in-progress**
+Preprint: [bioRxiv](https://www.biorxiv.org/content/10.64898/2026.11.06.764926v1)
 
 Scripts, experiements, notebooks to reproduce the results are found in a separate repo:
 [`ok_k_mer_experiments`](https://github.com/StephenHwang/Ok-k-mer_Experiments).
