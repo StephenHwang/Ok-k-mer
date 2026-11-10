@@ -22,8 +22,7 @@ okkmer help
 ```
 
 ### Docker/Singularity
-Ok-$k$-mer is available on docker and singularity.
-The image entrypoint is `okkmer`, so pass its subcommands directly. 
+Ok-*k*-mer is available on docker and singularity.
 Mount your input/output directory at `/data`; files created there persist on your computer.
 Genome paths in the manifest must be accessible **inside** the container.
 Prefer paths relative to the manifest and keep the genomes in the mounted folder.
@@ -32,7 +31,7 @@ Prefer paths relative to the manifest and keep the genomes in the mounted folder
 # with Docker
 docker pull hwangstephen/okkmer:latest
 docker run hwangstephen/okkmer:latest --version
-# pass any subcommand to the run okkmer in the container
+# pass any subcommand okkmer in the container
 docker run --user "$(id -u):$(id -g)" \
     -v "$PWD:/data" okkmer:latest \
     index --genomes genomes.tsv --k-low 6 --k-high 40 --threads 8 --output my_index
