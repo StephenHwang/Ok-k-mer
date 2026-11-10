@@ -141,12 +141,26 @@ Outputs must be new or empty directories; existing results are protected.
 ## Ok-*k*-mer plotting
 Ok-*k*-mer provides two plotting functions: `heatmap` and `tree`.
 
-Heatmaps show the best ρ over weights. Three-length plots require a fixed-*k*
-slice. Gray entries are unsearched, undefined, or repeated lengths.
+Heatmaps use the notebook's yellow-to-red correlation palette, square plot
+area, and alternating k labels. Colors range from zero to the largest plotted
+ρ; `--vmax` sets a common upper limit for comparisons. Negative correlations
+keep their stored sign and use the lowest color. Three-length plots require a
+fixed-*k* slice; `--k-radius` adds neighboring fixed-*k* panels with a shared
+color scale. Gray entries are unsearched, undefined, or repeated lengths;
+missing cells are never filled with inferred scores.
+
+Weight overlays are off by default. For 2k and 3k plots, `--show-weights` adds
+the notebook's grayscale circles in the triangle where the horizontal k is
+larger than the vertical k. Circle colors show the winning ensemble's `k1`
+weight: the row k for 2k, or the fixed k for 3k. The opposite triangle stays
+uncovered to show correlations. Saved best weights suffice; `--save-grid`
+is not required.
 ```bash
 okkmer plot heatmap --results search_results --ensemble-size 1 --output single.pdf
 okkmer plot heatmap --results search_results --ensemble-size 2 --output pairs.pdf
 okkmer plot heatmap --results search_results --ensemble-size 3 --fixed-k 20 --output triples.pdf
+okkmer plot heatmap --results search_results --ensemble-size 2 --show-weights --output pairs_weights.pdf
+okkmer plot heatmap --results search_results --ensemble-size 3 --fixed-k 20 --k-radius 3 --show-weights --output triple_panels.pdf
 ```
 
 To annotate internal tree nodes, first compute their recommendations before plotting.
