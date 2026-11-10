@@ -102,7 +102,8 @@ when another length fails to improve ρ by more than some tolerance,
 `--improvement-tol` (default 1e-12).
 Use `--no-early-stop` to evaluate every ensemble size through `--max-kmers` even 
 when an intermediate stage fails to improve ρ.
-The final recommendation still retains the best ensemble found.
+With `--no-early-stop`, the final recommendation is the ensemble with the highest
+ρ across all evaluated sizes, without applying an improvement tolerance.
 `--no-early-stop` and `--improvement-tol` are mutually exclusive.
 
 For an ensemble of *m* *k*-mers, each *k*-mer will have a distinct length *k* and a positive weight. 

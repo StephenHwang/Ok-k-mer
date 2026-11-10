@@ -15,7 +15,7 @@ from scipy.stats import rankdata, spearmanr
 
 from okkmer.cli import main
 from okkmer.index import load
-from okkmer.io import digest
+from okkmer.io import digest, read_table
 from okkmer.scoring import Scorer, compositions, weight_denominator
 from okkmer.search import candidates, optimize
 
@@ -78,6 +78,23 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(winner['ensemble_size'],1)
         self.assertEqual(reason,'max_kmers_reached')
         self.assertEqual(stages[2]['rows'][0]['ks'],[6,7,8])
+
+    def test_no_early_stop_keeps_improvement_below_default_tolerance(self):
+        target=np.arange(20000,dtype=float)
+        first,second=target.copy(),target.copy()
+        first[:2]=first[1::-1]
+        second[-2:]=second[:-3:-1]
+        distances=np.column_stack([first,second])
+        single=max(float(spearmanr(col,target).statistic) for col in distances.T)
+        expected=float(spearmanr(rankdata(first)+rankdata(second),target).statistic)
+        self.assertGreater(expected,single)
+        self.assertLess(expected-single,1e-12)
+        stages,winner,reason=optimize(distances,target,[6,7],2,.5,
+                                      stop_on_no_improvement=False)
+        self.assertEqual(len(stages),2)
+        self.assertEqual(reason,'max_kmers_reached')
+        self.assertEqual(winner['ensemble_size'],2)
+        self.assertAlmostEqual(winner['rho'],expected,places=14)
 
 
     def test_four_length_stage_matches_scipy(self):
@@ -172,6 +189,42 @@ class CLITests(unittest.TestCase):
         self.assertFalse((self.root/'dry').exists())
         self.assertEqual(self.invoke(*base,'--exclude-genomes',exclusion),0)
         self.assertEqual(json.loads((self.root/'dry/run.json').read_text())['n_genomes'],5)
+
+    def test_no_early_stop_and_improvement_tol_are_mutually_exclusive(self):
+        out=self.root/'conflict'
+        base=['search','--tree',self.tree,'--index',self.root/'index','--output',out]
+        for tolerance in ['0','1e-12']:
+            for flags in [('--no-early-stop','--improvement-tol',tolerance),
+                          ('--improvement-tol',tolerance,'--no-early-stop')]:
+                with self.subTest(flags=flags):
+                    with self.assertRaises(SystemExit) as caught:
+                        self.invoke(*base,*flags)
+                    self.assertEqual(caught.exception.code,2)
+                    self.assertFalse(out.exists())
+
+    def test_no_early_stop_selects_best_saved_ensemble_and_node_recommendations(self):
+        self.assertEqual(self.index()[0],0)
+        self.tree.write_text('(((a:1,b:2):1,c:3):1,d:4,e:6);')
+        out=self.root/'complete_search'
+        self.assertEqual(self.invoke('search','--tree',self.tree,'--index',self.root/'index',
+                                    '--k-low',6,'--k-high',8,'-n',3,'--w-step',.25,
+                                    '--no-early-stop','--annotate-nodes','--output',out),0)
+        result=json.loads((out/'run.json').read_text())
+        self.assertFalse(result['early_stopping'])
+        self.assertIsNone(result['improvement_tol'])
+        self.assertEqual([s['ensemble_size'] for s in result['stages']],[1,2,3])
+        evaluated=[row for size in [1,2,3] for row in read_table(out/f'combinations_{size}.tsv')]
+        self.assertEqual(result['recommendation']['rho'],max(float(row['rho']) for row in evaluated))
+        selected=[row for row in read_table(out/'recommendations.tsv') if row['selected']=='True']
+        self.assertEqual(len(selected),1)
+        self.assertEqual(float(selected[0]['rho']),result['recommendation']['rho'])
+        nodes=json.loads((out/'nodes.json').read_text())
+        self.assertTrue(any(node['status']=='ok' and node['n_genomes']==3 for node in nodes))
+        for node in nodes:
+            if node['status']=='ok':
+                self.assertEqual(len(node['stages']),3)
+                best=max((stage['best'] for stage in node['stages']),key=lambda row:row['rho'])
+                self.assertEqual(node['recommendation'],best)
 
     def test_missing_ks_and_index_checksum(self):
         _,out=self.index()

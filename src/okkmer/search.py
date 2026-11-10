@@ -44,6 +44,7 @@ def optimize(distances, target, ks, maximum, step, delta=None, threads=1, tolera
     scorer = Scorer(distances, target)
     lookup = {k:i for i,k in enumerate(ks)}
     denominator = weight_denominator(step)
+    required_improvement = tolerance if stop_on_no_improvement else 0.0
     stages, previous, winner, reason = [], None, None, 'max_kmers_reached'
     for size in range(1,maximum+1):
         coefficients = list(compositions(denominator, size))
@@ -86,7 +87,7 @@ def optimize(distances, target, ks, maximum, step, delta=None, threads=1, tolera
         for row in rows:
             row['gap_to_stage_best'] = best['rho']-row['rho']
         stages.append({'size':size,'rows':rows,'best':best})
-        improves = winner is None or best['rho'] > winner['rho']+tolerance
+        improves = winner is None or best['rho'] > winner['rho']+required_improvement
         if not improves and stop_on_no_improvement:
             reason = 'no_improvement'
             break
@@ -201,7 +202,8 @@ def run(args):
            'tree_path':str(Path(args.tree).resolve()),'tree_sha256':digest(args.tree),
            'index_path':str(Path(args.index).resolve()),'index_manifest_sha256':digest(Path(args.index)/'manifest.json'),
            'mode':'global' if args.local is None else 'local','delta_k':args.local,'ks':ks,'max_kmers':args.max_kmers,
-           'early_stopping':not args.no_early_stop,'w_step':args.w_step,'save_grid':args.save_grid,'threads':args.threads,'improvement_tol':args.improvement_tol,
+           'early_stopping':not args.no_early_stop,'w_step':args.w_step,'save_grid':args.save_grid,'threads':args.threads,
+           'improvement_tol':None if args.no_early_stop else args.improvement_tol,
            'excluded_genomes':sorted(exclusions),'n_genomes':len(set(a)|set(b)), 'n_pairs':len(target),
            'candidate_weight_upper_bounds':estimates,'rank_ties':'average','score':'spearman_distance',**summary}
     write_json(out/'run.json',run)
