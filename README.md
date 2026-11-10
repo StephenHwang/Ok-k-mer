@@ -141,13 +141,13 @@ Outputs must be new or empty directories; existing results are protected.
 ## Ok-*k*-mer plotting
 Ok-*k*-mer provides two plotting functions: `heatmap` and `tree`.
 
-### Plotting heatmaps
+### Plotting correlation heatmaps
 Heatmap plots show the Spearman correlation, ρ, over a range of *k*-mer lengths from `okkmer search`.
-Add `--show-weights` to overlay weights for two and three and *k*-mer ensemble plots.
-Weight overlays are off by default.
+Add `--show-weights` to overlay weights for two and three and *k*-mer ensemble plots; overlays are off by default.
+Weight overlays are only drawn for cells with distinct *k*-mers. 
 
 Three-length plots require a fixed-*k* slice; `--k-radius` adds +-<k-radius> neighboring panels.
-Gray entries are unsearched, undefined, or repeated lengths.
+Gray entries are unsearched or undefined ensembles.
 
 ```bash
 # Plot colorbar of single k-mer correlations

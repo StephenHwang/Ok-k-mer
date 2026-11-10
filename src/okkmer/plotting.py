@@ -27,6 +27,112 @@ def save(fig, output, plt):
     print(f'Saved {path}')
 
 
+def _heatmap_data(rows, ks, size, fixed_k=None, lower_rows=()):
+    """Keep winning rho and matching weights together, including mirrored cells."""
+    lookup = {k:i for i,k in enumerate(ks)}
+    shape = (1,len(ks)) if size == 1 else (len(ks),len(ks))
+    matrix = np.full(shape,np.nan)
+    weights = np.full(shape,np.nan)
+    for row in rows:
+        lengths = json.loads(row['ks'])
+        rho = float(row['rho'])
+        if not np.isfinite(rho):
+            continue
+        if size == 1:
+            cells = [(0,lookup[lengths[0]],np.nan)]
+        else:
+            if size == 3 and fixed_k not in lengths:
+                continue
+            saved_weights = json.loads(row['weights'])
+            by_k = dict(zip(lengths,saved_weights))
+            remaining = sorted(k for k in lengths if k != fixed_k)
+            a,b = (lookup[k] for k in remaining)
+            # k1 is the row in 2k plots, or the fixed length in 3k plots.
+            cells = [(a,b,by_k[fixed_k] if size == 3 else by_k[remaining[0]]),
+                     (b,a,by_k[fixed_k] if size == 3 else by_k[remaining[1]])]
+        for y,x,weight in cells:
+            if not np.isfinite(matrix[y,x]) or rho > matrix[y,x]:
+                matrix[y,x],weights[y,x] = rho,weight
+    # Repeated lengths reduce to a saved lower-order ensemble. Do not use
+    # lower-order scores to fill unsearched combinations of distinct lengths.
+    reduced = {}
+    for row in lower_rows:
+        key = tuple(sorted(json.loads(row['ks'])))
+        rho = float(row['rho'])
+        if len(key) < size and np.isfinite(rho):
+            reduced[key] = max(reduced.get(key,-np.inf),rho)
+    if size > 1:
+        for y,k_y in enumerate(ks):
+            for x,k_x in enumerate(ks):
+                key = tuple(sorted({k_y,k_x} if size == 2 else {fixed_k,k_y,k_x}))
+                if len(key) < size and key in reduced:
+                    matrix[y,x] = reduced[key]
+                    # A lower-order result has no unique split of its weights
+                    # between duplicate positions; show correlation only.
+                    weights[y,x] = np.nan
+    return matrix,weights
+
+
+def _heatmap_figure(rows, metadata, size, fixed_ks, show_weights, plt, vmax=None, lower_rows=()):
+    """Notebook-style correlation panels with optional triangular weight circles."""
+    from matplotlib.colors import Normalize
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.patches import Circle
+
+    ks = metadata['ks']
+    panels = [_heatmap_data(rows,ks,size,k,lower_rows) for k in fixed_ks]
+    finite = [matrix[np.isfinite(matrix)] for matrix,_ in panels]
+    finite = np.concatenate(finite)
+    if not finite.size:
+        raise ValueError('No evaluated combinations are available in this heatmap slice')
+    if vmax is None:
+        vmax = max(float(finite.max()),1e-12)
+    cmap = plt.get_cmap('YlOrRd').copy()
+    cmap.set_bad('lightgray')
+    norm = Normalize(0,vmax)
+    # The original one-k plot deliberately fills the same square as the 2k plot.
+    n = len(panels)
+    width = (8 if size != 3 else max(6,3.5*n+1.2)) + (1 if show_weights else 0)
+    height = 6 if size != 3 else 4.5
+    fig = plt.figure(figsize=(width,height),layout='constrained')
+    grid = fig.add_gridspec(1,n+1+int(show_weights),
+                            width_ratios=[1]*n+[.045]+([.045] if show_weights else []))
+    weight_cmap = plt.get_cmap('Greys',max(2,round(1/metadata.get('w_step',.05))+1))
+    weight_norm = Normalize(0,1)
+    for i,((matrix,weights),fixed_k) in enumerate(zip(panels,fixed_ks)):
+        ax = fig.add_subplot(grid[0,i])
+        im = ax.imshow(matrix,origin='lower',cmap=cmap,norm=norm,
+                       aspect='auto' if size == 1 else 'equal')
+        ax.set_box_aspect(1)
+        ticks = list(range(0,len(ks),2 if size == 3 else 1))
+        labels = [str(ks[j]) if i % 2 == 0 else '' for i,j in enumerate(ticks)]
+        ax.set_xticks(ticks,labels,fontsize=13)
+        ax.set_xlabel('$k_1$' if size == 1 else ('$k_2$' if size == 2 else '$k_3$'),fontsize=17)
+        if size == 1:
+            ax.set_yticks([])
+        else:
+            ax.set_yticks(ticks,labels,fontsize=13)
+            ax.set_ylabel('$k_1$' if size == 2 else '$k_2$',fontsize=17)
+        if size == 3:
+            ax.set_title(f'$k_1$={fixed_k}',fontsize=17)
+        if show_weights:
+            for y,x in zip(*np.where(np.isfinite(matrix) & np.isfinite(weights))):
+                if x > y:
+                    ax.add_patch(Circle((x,y),.4,facecolor=weight_cmap(weight_norm(weights[y,x])),
+                                        edgecolor='black',linewidth=.5))
+    cbar = fig.colorbar(im,cax=fig.add_subplot(grid[0,n]))
+    cbar.set_label('Spearman correlation, ρ',fontsize=16)
+    cbar.ax.tick_params(labelsize=13)
+    if show_weights:
+        bar = fig.colorbar(ScalarMappable(norm=weight_norm,cmap=weight_cmap),
+                           cax=fig.add_subplot(grid[0,n+1]),ticks=np.linspace(0,1,6))
+        bar.set_label('$k_1$ weight',fontsize=16)
+        bar.ax.tick_params(labelsize=13)
+    words = {1:'one k-mer',2:'two k-mers',3:'three k-mers'}
+    fig.suptitle(f"Spearman correlation for {words[size]}",fontsize=19)
+    return fig
+
+
 def heatmap(args):
     plt = pyplot()
     root = Path(args.results)
@@ -35,44 +141,29 @@ def heatmap(args):
         raise ValueError('A three-length heatmap requires --fixed-k for a two-dimensional slice')
     if args.ensemble_size != 3 and args.fixed_k is not None:
         raise ValueError('--fixed-k is only valid for three-length heatmaps')
-    rows = read_table(root/f'combinations_{args.ensemble_size}.tsv')
-    ks = metadata['ks']
-    if args.fixed_k is not None and args.fixed_k not in ks:
+    if args.k_radius < 0 or (args.k_radius and args.ensemble_size != 3):
+        raise ValueError('--k-radius must be nonnegative and is only valid for three-length heatmaps')
+    if args.show_weights and args.ensemble_size == 1:
+        raise ValueError('--show-weights is only valid for two- or three-length heatmaps')
+    if args.vmax is not None and (not np.isfinite(args.vmax) or args.vmax <= 0):
+        raise ValueError('--vmax must be finite and positive')
+    if args.fixed_k is not None and args.fixed_k not in metadata['ks']:
         raise ValueError('--fixed-k is outside the search k range')
-    axis_ks = [k for k in ks if k != args.fixed_k]
-    lookup = {k:i for i,k in enumerate(axis_ks)}
-    matrix = np.full((1,len(ks)) if args.ensemble_size == 1 else (len(axis_ks),len(axis_ks)),np.nan)
-    for row in rows:
-        lengths = json.loads(row['ks'])
-        if args.ensemble_size == 1:
-            matrix[0,lookup[lengths[0]]] = float(row['rho'])
-        else:
-            if args.ensemble_size == 3:
-                if args.fixed_k not in lengths:
-                    continue
-                lengths.remove(args.fixed_k)
-            a,b = (lookup[k] for k in lengths)
-            matrix[a,b] = matrix[b,a] = float(row['rho'])
-    if not np.isfinite(matrix).any():
-        raise ValueError('No evaluated combinations are available in this heatmap slice')
-    fig,ax = plt.subplots(figsize=(8,2.5 if args.ensemble_size == 1 else 7))
-    cmap = plt.get_cmap('viridis').copy()
-    cmap.set_bad('lightgray')
-    im = ax.imshow(matrix,origin='lower',cmap=cmap,aspect='auto' if args.ensemble_size == 1 else 'equal',vmin=-1,vmax=1)
-    ax.set_xticks(range(len(axis_ks)),axis_ks,rotation=90)
-    if args.ensemble_size == 1:
-        ax.set_yticks([])
-        ax.set_xlabel('k-mer length')
-    else:
-        ax.set_yticks(range(len(axis_ks)),axis_ks)
-        ax.set(xlabel='k-mer length',ylabel='k-mer length')
-    title = f'{args.ensemble_size}-length ensembles: best rho over weights'
-    if args.fixed_k is not None:
-        title += f' (fixed k={args.fixed_k})'
-    ax.set_title(title+'\nGray: unavailable, unsearched, or repeated lengths',fontsize=10)
-    fig.colorbar(im,ax=ax,label='Spearman correlation, ρ')
-    fig.tight_layout()
-    save(fig,args.output,plt)
+    rows = read_table(root/f'combinations_{args.ensemble_size}.tsv')
+    lower_rows = []
+    for size in range(1,args.ensemble_size):
+        path = root/f'combinations_{size}.tsv'
+        if size == 1 and not path.exists():
+            path = root/'single_k.tsv'
+        if path.exists():
+            lower_rows.extend(read_table(path))
+    fixed_ks = ([k for k in metadata['ks'] if abs(k-args.fixed_k) <= args.k_radius]
+                if args.ensemble_size == 3 else [None])
+    fig = _heatmap_figure(rows,metadata,args.ensemble_size,fixed_ks,args.show_weights,plt,args.vmax,lower_rows=lower_rows)
+    try:
+        save(fig,args.output,plt)
+    finally:
+        plt.close(fig)
 
 
 def _tree_figure(reference, annotations, metadata, plt, min_leaves=5):
