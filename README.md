@@ -142,29 +142,24 @@ Outputs must be new or empty directories; existing results are protected.
 Ok-*k*-mer provides two plotting functions: `heatmap` and `tree`.
 
 ### Plotting heatmaps
-Heatmaps use the notebook's yellow-to-red correlation palette, square plot
-area, and alternating k labels. Colors range from zero to the largest plotted
-ρ; `--vmax` sets a common upper limit for comparisons. Negative correlations
-keep their stored sign and use the lowest color. Three-length plots require a
-fixed-*k* slice; `--k-radius` adds neighboring fixed-*k* panels with a shared
-color scale. Gray entries are unsearched, undefined, or repeated lengths;
-missing cells are never filled with inferred scores.
+Heatmap plots show the Spearman correlation, ρ, over a range of *k*-mer lengths from `okkmer search`.
+Add `--show-weights` to overlay weights for two and three and *k*-mer ensemble plots.
+Weight overlays are off by default.
 
-Weight overlays are off by default. For 2k and 3k plots, `--show-weights` adds
-the notebook's grayscale circles in the triangle where the horizontal k is
-larger than the vertical k. Circle colors show the winning ensemble's `k1`
-weight: the row k for 2k, or the fixed k for 3k. The opposite triangle stays
-uncovered to show correlations. Saved best weights suffice; `--save-grid`
-is not required.
+Three-length plots require a fixed-*k* slice; `--k-radius` adds +-<k-radius> neighboring panels.
+Gray entries are unsearched, undefined, or repeated lengths.
 
-Heatmaps show the best ρ over weights. Three-length plots require a fixed-*k*
-slice. Gray entries are unsearched, undefined, or repeated lengths.
 ```bash
-okkmer plot heatmap --results search_results --ensemble-size 1 --output single.pdf
-okkmer plot heatmap --results search_results --ensemble-size 2 --output pairs.pdf
-okkmer plot heatmap --results search_results --ensemble-size 3 --fixed-k 20 --output triples.pdf
-okkmer plot heatmap --results search_results --ensemble-size 2 --show-weights --output pairs_weights.pdf
-okkmer plot heatmap --results search_results --ensemble-size 3 --fixed-k 20 --k-radius 3 --show-weights --output triple_panels.pdf
+# Plot colorbar of single k-mer correlations
+okkmer plot heatmap --results search_results --ensemble-size 1 --output single_kmer_ensemble.pdf
+
+# Plot heatmap of two k-mer ensemble correlations (add --show-weights to overlay k-mer weights)
+okkmer plot heatmap --results search_results --ensemble-size 2 --output two_kmer_ensemble.pdf
+
+# Plot heatmap of three k-mer ensemble correlations (add --show-weights to overlay k-mer weights)
+#  --fixed-k <k> is required, with --k-radius <int> to plot +-<int> k-mers in adjacent panels
+okkmer plot heatmap --results search_results --ensemble-size 3 --fixed-k 20 --output three_kmer_ensemble.pdf
+okkmer plot heatmap --results search_results --ensemble-size 3 --fixed-k 20 --k-radius 3 --show-weights --output three_kmer_ensemble_with_adjacent_kmers.pdf
 ```
 
 ### Plotting annotated phylogenetic trees
