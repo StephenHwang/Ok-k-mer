@@ -141,6 +141,7 @@ Outputs must be new or empty directories; existing results are protected.
 ## Ok-*k*-mer plotting
 Ok-*k*-mer provides two plotting functions: `heatmap` and `tree`.
 
+### Plotting heatmaps
 Heatmaps use the notebook's yellow-to-red correlation palette, square plot
 area, and alternating k labels. Colors range from zero to the largest plotted
 ρ; `--vmax` sets a common upper limit for comparisons. Negative correlations
@@ -155,6 +156,9 @@ larger than the vertical k. Circle colors show the winning ensemble's `k1`
 weight: the row k for 2k, or the fixed k for 3k. The opposite triangle stays
 uncovered to show correlations. Saved best weights suffice; `--save-grid`
 is not required.
+
+Heatmaps show the best ρ over weights. Three-length plots require a fixed-*k*
+slice. Gray entries are unsearched, undefined, or repeated lengths.
 ```bash
 okkmer plot heatmap --results search_results --ensemble-size 1 --output single.pdf
 okkmer plot heatmap --results search_results --ensemble-size 2 --output pairs.pdf
@@ -163,26 +167,30 @@ okkmer plot heatmap --results search_results --ensemble-size 2 --show-weights --
 okkmer plot heatmap --results search_results --ensemble-size 3 --fixed-k 20 --k-radius 3 --show-weights --output triple_panels.pdf
 ```
 
+### Plotting annotated phylogenetic trees
 To annotate internal tree nodes, first compute their recommendations before plotting.
+
 The search with `--annotate-nodes` repeats the Ok-*k*-mer search per internal node.
 Search mode `--local` refers to *k* neighborhoods, independently of subtree annotation.
-`nodes.json`, `nodes.tsv`, and per-node combination tables are saved. 
+Tables for `nodes.json`, `nodes.tsv`, and per-node combinations are saved. 
+Plotting visualizes the saved `nodes.json` recommendations.
+
+The plot command writes `annotated_tree.pdf` and `annotated_tree.png` (600 dpi).
+Providing a `.pdf`, `.png`, or `.svg` filename ending saves only that format. 
+Use `--dpi 300` to change PNG resolution.
+
+Internal nodes are annotated by text and a pie chart with slices colored by *k*-mer length and size proportional to ensemble weights.
+By default, only internal nodes with five or more leaves are annotated.
+Use `--min-leaves` to annotate smaller clades.
+
 ```bash
-# calculate the annotations for internal nodes
+# search for the ensembles at the internal nodes
 okkmer search --tree reference.nwk --index my_index -n 3 \
     --annotate-nodes --output annotated_results
+
 # plot annotated phylogenetic tree
 okkmer plot tree --results annotated_results --output annotated_tree
 ```
-
-The plot command writes `annotated_tree.pdf` (vector) and `annotated_tree.png` (600 dpi).
-Providing a `.pdf`, `.png`, or `.svg` filename ending saves only that format. 
-Use `--dpi 300` to change PNG resolution.
-Internal nodes are annotated by text and a pie chart with slices colored by *k*-mer length and size proportional to ensemble weights.
-By default, only clades with at least five retained leaves are annotated.
-Use `--min-leaves` to include smaller scorable clades. 
-Plotting uses saved `nodes.json` recommendations without repeating optimization.
-
 
 ## Citing Ok-*k*-mer and reproducing results
 Preprint: [bioRxiv](https://www.biorxiv.org/content/10.64898/2026.11.06.764926v1)
