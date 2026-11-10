@@ -21,22 +21,28 @@ dashing2 --help
 okkmer help
 ```
 
-### Docker/Singularity
-Ok-*k*-mer is available on docker and singularity.
-Mount your input/output directory at `/data`; files created there persist on your computer.
+### Docker/Singularity container
+Ok-*k*-mer is available as Docker and Singularity conainters.
+
+Mount your input/output directory at `/data`.
 Genome paths in the manifest must be accessible **inside** the container.
 Prefer paths relative to the manifest and keep the genomes in the mounted folder.
 
+With Docker:
 ```bash
-# with Docker
+# Pull the image
 docker pull hwangstephen/okkmer:latest
 docker run hwangstephen/okkmer:latest --version
-# pass any okkmer subcommand to the container
-docker run --user "$(id -u):$(id -g)" \
-    -v "$PWD:/data" okkmer:latest \
-    index --genomes genomes.tsv --k-low 6 --k-high 40 --threads 8 --output my_index
 
-# With Singularity
+# Pass any okkmer subcommand to the container
+docker run -v "$PWD:/data" okkmer:latest \
+    index --genomes genomes.tsv --k-low 6 --k-high 40 --threads 8 \
+    --output my_index
+```
+
+
+With Singularity:
+```bash
 singularity pull okkmer.sif docker://hwangstephen/okkmer:latest
 ./okkmer.sif help
 ```
