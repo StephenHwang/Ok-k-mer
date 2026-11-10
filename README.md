@@ -6,17 +6,17 @@ distances across a phylogenetic tree.
 The executable and Python package are named `okkmer`.
 
 ## Installation
+Ok-*k*-mer can be installed using pip locally. We recommend using a new conda or virtual environment for this.
 
-Python 3.10 or newer:
+Ok-*k*-mer requires Python ≥ 3.10 and [Dashing2 **v2.1.21**](https://github.com/dnbaker/dashing2/releases/tag/v2.1.21).
+Dashing2 is a separate executable dependency for computing the *k*-mer Jaccard distances required by Ok-*k*-mer. 
+Distance matrices computed by other tools can be imported and used by Ok-*k*-mer. 
 
 ```bash
 python -m pip install .
+dashing2 --help
 okkmer help
 ```
-
-[Dashing2 **v2.1.21**](https://github.com/dnbaker/dashing2/releases/tag/v2.1.21) is a separate executable dependency for computing the *k*-mer
-Jaccards distanced required by Ok-*k*-mer. 
-Distance matrices computed by other tools can be imported and used by Ok-*k*-mer. 
 
 For development use `python -m pip install -e .`.
 
@@ -25,7 +25,7 @@ Ok-*k*-mer performs it's *k*-mer length ensemble search over pairwise genomic di
 from genomes of a phylogenetic tree.
 To specify the input genome, a genome manifest is needed.
 A genome manifest is a TSV with `genome_id` and `path` columns, where
-IDs must match the input reference tree genomes.
+IDs must be unique and match the input reference tree genomes.
 
 Relative genome paths are interpreted relative to the folder containing the genome manifest,
 not where `okkmer` is ran. Absolute paths are used directly.
@@ -99,8 +99,9 @@ Ok-*k*-mer's search stops searching for additional *k*-mers, or up to `--max-kme
 when another length fails to improve ρ by more than some tolerance,
 `--improvement-tol` (default 1e-12).
 Use `--no-early-stop` to evaluate every ensemble size through `--max-kmers` even 
-when an intermediate stage fails to improve ρ. 
+when an intermediate stage fails to improve ρ.
 The final recommendation still retains the best ensemble found.
+`--no-early-stop` and `--improvement-tol` are mutually exclusive.
 
 For an ensemble of *m* *k*-mers, each *k*-mer will have a distinct length *k* and a positive weight. 
 The weights sum to one.
