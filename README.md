@@ -13,14 +13,13 @@ Dashing2 is a separate executable dependency for computing the *k*-mer Jaccard d
 Distance matrices computed by other tools can be imported and used by Ok-*k*-mer. 
 
 ```bash
+git clone https://github.com/StephenHwang/Ok-k-mer.git
 python -m pip install .
 dashing2 --help
 okkmer help
 ```
 
-For development use `python -m pip install -e .`.
-
-## Building the index
+## Building an Ok-*k*-mer index
 Ok-*k*-mer performs it's *k*-mer length ensemble search over pairwise genomic distances 
 from genomes of a phylogenetic tree.
 To specify the input genome, a genome manifest is needed.
