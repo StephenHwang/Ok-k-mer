@@ -1,0 +1,14 @@
+# Allow only files needed by the build and optional test stage.
+**
+!Dockerfile
+!.dockerignore
+!pyproject.toml
+!README.md
+!LICENSE
+!src/
+!src/**
+!tests/
+!tests/**
+**/__pycache__/
+**/*.py[cod]
+**/*.egg-info/
