@@ -149,17 +149,26 @@ okkmer plot heatmap --results search_results --ensemble-size 2 --output pairs.pd
 okkmer plot heatmap --results search_results --ensemble-size 3 --fixed-k 20 --output triples.pdf
 ```
 
-To annotate internal tree nodes, first compute their recommendations:
+To annotate internal tree nodes, first compute their recommendations before plotting.
+The search with `--annotate-nodes` repeats the Ok-*k*-mer search per internal node.
+Search mode `--local` refers to *k* neighborhoods, independently of subtree annotation.
+`nodes.json`, `nodes.tsv`, and per-node combination tables are saved. 
 ```bash
+# calculate the annotations for internal nodes
 okkmer search --tree reference.nwk --index my_index -n 3 \
     --annotate-nodes --output annotated_results
-okkmer plot tree --results annotated_results --output annotated_tree.pdf
+# plot annotated phylogenetic tree
+okkmer plot tree --results annotated_results --output annotated_tree
 ```
 
-This repeats optimization per internal node. Nodes with fewer than three genomes 
-or constant distances are marked unscorable.
-`nodes.json`, `nodes.tsv`, and per-node combination tables are saved. Search
-mode `--local` refers to *k* neighborhoods, independently of subtree annotation.
+The plot command writes `annotated_tree.pdf` (vector) and `annotated_tree.png` (600 dpi).
+Providing a `.pdf`, `.png`, or `.svg` filename ending saves only that format. 
+Use `--dpi 300` to change PNG resolution.
+Internal nodes are annotated by text and a pie chart with slices colored by *k*-mer length and size proportional to ensemble weights.
+By default, only clades with at least five retained leaves are annotated.
+Use `--min-leaves` to include smaller scorable clades. 
+Plotting uses saved `nodes.json` recommendations without repeating optimization.
+
 
 ## Citing Ok-*k*-mer and reproducing results
 Preprint: [bioRxiv](https://www.biorxiv.org/content/10.64898/2026.11.06.764926v1)

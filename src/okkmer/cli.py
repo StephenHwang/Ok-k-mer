@@ -45,9 +45,11 @@ def parser():
     heat.add_argument('--ensemble-size',type=int,choices=[1,2,3],default=2)
     heat.add_argument('--fixed-k',type=int)
     tree = plots.add_parser('tree',help='Render saved subtree annotations')
+    tree.add_argument('--dpi',type=int,default=600,help='PNG resolution (default: 600 dpi)')
+    tree.add_argument('--min-leaves',type=int,default=5,help='Minimum retained clade size for pies and recommendation text (default: 5); all retained leaves and internal branches are still plotted')
     for item in (heat,tree):
         item.add_argument('--results',type=Path,required=True)
-        item.add_argument('--output',type=Path,required=True,help='New .pdf, .png, or .svg file')
+        item.add_argument('--output',type=Path,required=True,help='New .pdf, .png, or .svg file; tree also accepts an extensionless prefix to save PDF and PNG')
     sub.add_parser('help',help='Show help; also accepts a subcommand, e.g. okkmer help search')
     return p
 
