@@ -25,9 +25,10 @@ from genomes of a phylogenetic tree.
 To specify the input genome, a genome manifest is needed.
 A genome manifest is a TSV with `genome_id` and `path` columns, where
 IDs must be unique and match the input reference tree genomes.
-
+Paths lead to the FASTA file of each genome.
+Absolute paths are used directly.
 Relative genome paths are interpreted relative to the folder containing the genome manifest,
-not where `okkmer` is ran. Absolute paths are used directly.
+not where `okkmer` is ran. 
 
 ```text
 genome_id	path
