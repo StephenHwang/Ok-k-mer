@@ -6,6 +6,8 @@ distances across a phylogenetic tree.
 The executable and Python package are named `okkmer`.
 
 ## Installation
+
+### pip installation
 Ok-*k*-mer can be installed using pip locally. We recommend using a new conda or virtual environment for this.
 
 Ok-*k*-mer requires Python ≥ 3.10 and [Dashing2 **v2.1.21**](https://github.com/dnbaker/dashing2/releases/tag/v2.1.21).
@@ -19,31 +21,27 @@ dashing2 --help
 okkmer help
 ```
 
-### Docker
-
-The [Dockerfile](Dockerfile) bundles Ok-*k*-mer, its Python dependencies, and
-Dashing2 v2.1.21. No local Python or Dashing2 installation is needed.
-Build and check the image from this repository's root:
-
-```bash
-docker build -t okkmer:0.1.0 .
-docker run --rm okkmer:0.1.0 --version
-docker run --rm okkmer:0.1.0 help
-```
-
-The image entrypoint is `okkmer`, so pass its subcommands directly. Mount your
-input/output directory at `/data`; files created there persist on your computer:
-
-```bash
-docker run --rm --user "$(id -u):$(id -g)" \
-    -v "$PWD:/data" okkmer:0.1.0 \
-    index --genomes genomes.tsv --k-low 6 --k-high 40 --threads 8 --output my_index
-```
-
+### Docker/Singularity
+Ok-$k$-mer is available on docker and singularity.
+The image entrypoint is `okkmer`, so pass its subcommands directly. 
+Mount your input/output directory at `/data`; files created there persist on your computer.
 Genome paths in the manifest must be accessible **inside** the container.
 Prefer paths relative to the manifest and keep the genomes in the mounted folder.
-See [the Docker guide](docs/docker.md) for an end-to-end test, search and plot
-examples, Docker Hub publishing, and Intel/AMD versus Apple Silicon builds.
+
+```bash
+# with Docker
+docker pull hwangstephen/okkmer:latest
+docker run hwangstephen/okkmer:latest --version
+# pass any subcommand to the run okkmer in the container
+docker run --user "$(id -u):$(id -g)" \
+    -v "$PWD:/data" okkmer:latest \
+    index --genomes genomes.tsv --k-low 6 --k-high 40 --threads 8 --output my_index
+
+# With Singularity
+singularity pull okkmer.sif docker://hwangstephen/okkmer:latest
+./okkmer.sif help
+```
+
 
 ## Building an Ok-*k*-mer index
 Ok-*k*-mer performs it's *k*-mer length ensemble search over pairwise genomic distances 
