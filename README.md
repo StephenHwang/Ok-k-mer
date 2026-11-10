@@ -31,7 +31,7 @@ Prefer paths relative to the manifest and keep the genomes in the mounted folder
 # with Docker
 docker pull hwangstephen/okkmer:latest
 docker run hwangstephen/okkmer:latest --version
-# pass any subcommand okkmer in the container
+# pass any okkmer subcommand to the container
 docker run --user "$(id -u):$(id -g)" \
     -v "$PWD:/data" okkmer:latest \
     index --genomes genomes.tsv --k-low 6 --k-high 40 --threads 8 --output my_index
