@@ -28,7 +28,8 @@ IDs must be unique and match the input reference tree genomes.
 Paths lead to the FASTA file of each genome.
 Absolute paths are used directly.
 Relative genome paths are interpreted relative to the folder containing the genome manifest,
-not where `okkmer` is ran. 
+not where `okkmer` is ran. Genome fasta files may share the same filename in different folders. 
+Ok-*k*-mer gives Dashing2 unique input names derived from the unique genome IDs.
 
 ```text
 genome_id	path
@@ -36,6 +37,7 @@ genome_A	genomes/A.fna
 genome_B	genomes/B.fna
 genome_C	genomes/C.fna
 ```
+
 By default, Ok-*k*-mer uses Dashing2 to compute the starting pairwise genomic distances.
 ```bash
 okkmer index --genomes genomes.tsv --k-low 6 --k-high 40 \

@@ -1,4 +1,5 @@
 import contextlib
+import gzip
 import io
 import itertools
 import json
@@ -212,6 +213,64 @@ for i,name in enumerate(names):
         self.assertEqual(self.invoke('index','--genomes',genomes,'--dashing2',fake,'--k-low',6,'--k-high',6,'--output',out),0)
         np.testing.assert_allclose(load(out)[1],.75)
         self.assertFalse((out/'dashing2/work_k6').exists())
+
+    def test_dashing_duplicate_basenames_preserve_distances_and_provenance(self):
+        # Model Dashing's basename-based cache with actual canonical k-mer sets.
+        fake=self.root/'dashing2'
+        fake.write_text('''#!/usr/bin/env python3
+import gzip
+import json
+from pathlib import Path
+import sys
+if '--version' in sys.argv:
+    print('Dashing2 version 2.1.21');sys.exit(1)
+paths=open(sys.argv[sys.argv.index('-F')+1]).read().splitlines()
+cache=Path(sys.argv[sys.argv.index('--outprefix')+1])
+k=int(sys.argv[sys.argv.index('-k')+1])
+complement=str.maketrans('ACGT','TGCA')
+for source in paths:
+    opener=gzip.open if source.endswith('.gz') else open
+    with opener(source,'rt') as handle:
+        seq=''.join(line.strip() for line in handle if not line.startswith('>'))
+    words=set()
+    for i in range(len(seq)-k+1):
+        word=seq[i:i+k]
+        words.add(min(word,word.translate(complement)[::-1]))
+    (cache/Path(source).name).write_text(json.dumps(sorted(words)))
+sets=[set(json.loads((cache/Path(source).name).read_text())) for source in paths]
+print('#Sources\\t'+'\\t'.join(paths))
+for source,a in zip(paths,sets):
+    print(source+'\\t'+'\\t'.join(str(len(a&b)/len(a|b)) for b in sets))
+''')
+        fake.chmod(0o755)
+        # These IDs also collide if naively sanitized into filenames.
+        names=['a/b','a?b','c name']
+        originals={}
+        lines=['genome_id\tpath']
+        for i,(name,seq) in enumerate(zip(names,['AAAAAC','AAAACC','CCCCCC'])):
+            folder=self.root/f'input_{i}';folder.mkdir()
+            source=folder/('genome.fna.gz' if i==2 else 'genome.fna')
+            content=f'>seq\n{seq}\n'.encode()
+            source.write_bytes(gzip.compress(content,mtime=0) if i==2 else content)
+            originals[name]=source
+            lines.append(f'{name}\t{source.relative_to(self.root)}')
+        hashes={name:digest(source) for name,source in originals.items()}
+        manifest=self.root/'genomes.tsv';manifest.write_text('\n'.join(lines)+'\n')
+        out=self.root/'computed'
+        self.assertEqual(self.invoke('index','--genomes',manifest,'--dashing2',fake,
+                                    '--k-low',3,'--k-high',4,'--output',out),0)
+        metadata,distances=load(out)
+        self.assertEqual(metadata['genomes'],names)
+        np.testing.assert_allclose(distances,[[1/3,1/3],[1,1],[1,1]])
+        for row in metadata['provenance']['genomes']:
+            name=row['genome_id']
+            self.assertEqual(row['path'],str(originals[name].resolve()))
+            self.assertEqual(row['sha256'],hashes[name])
+            staged=Path(row['dashing2_path'])
+            self.assertTrue(staged.is_relative_to(out.resolve()))
+            self.assertEqual(staged.read_bytes(),originals[name].read_bytes())
+        self.assertEqual({name:digest(source) for name,source in originals.items()},hashes)
+        for k in [3,4]:self.assertFalse((out/f'dashing2/work_k{k}').exists())
 
 
 if __name__ == '__main__': unittest.main()

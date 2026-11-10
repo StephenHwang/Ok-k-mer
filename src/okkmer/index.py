@@ -143,8 +143,21 @@ def build(args):
         out = new_directory(args.output)
         raw = out / 'dashing2'
         raw.mkdir()
+        # Dashing's --outprefix flattens input basenames into one cache folder.
+        # Use ID-based aliases; the ordinal also separates sanitized/truncated IDs.
+        inputs = (raw / 'genomes').resolve()
+        inputs.mkdir()
+        staged_genomes = {}
+        for i, (name, source) in enumerate(genomes.items()):
+            safe_id = re.sub(r'[^A-Za-z0-9_.-]', '_', name)[:100]
+            suffix = source.suffix
+            if not re.fullmatch(r'\.[A-Za-z][A-Za-z0-9]{0,15}', suffix):
+                suffix = '.fna'
+            staged = inputs / f'{i:06d}_{safe_id}{suffix}'
+            staged.symlink_to(source)
+            staged_genomes[name] = staged
         genome_list = raw / 'genome_paths.txt'
-        genome_list.write_text(''.join(str(path)+'\n' for path in genomes.values()))
+        genome_list.write_text(''.join(str(path)+'\n' for path in staged_genomes.values()))
         commands = []
         for k in ks:
             work = raw / f'work_k{k}'
@@ -156,11 +169,12 @@ def build(args):
                 subprocess.run(cmd, stdout=stdout, stderr=stderr, check=True, cwd=work.resolve())
             # Remove only successful invocation's private intermediates.
             shutil.rmtree(work)
-        names, values, sources = matrix_directory(raw, ks, 'similarity', {str(p): n for n,p in genomes.items()})
+        names, values, sources = matrix_directory(raw, ks, 'similarity', {str(p): n for n,p in staged_genomes.items()})
         kind = 'similarity'
         provenance.update(dashing2_version=description, dashing2_revision=revision, executable=str(Path(executable).resolve()),
                           executable_sha256=digest(executable), commands=commands,
-                          genomes=[{'genome_id': n, 'path': str(p), 'sha256': digest(p)} for n,p in genomes.items()])
+                          genomes=[{'genome_id': n, 'path': str(p), 'sha256': digest(p),
+                                    'dashing2_path': str(staged_genomes[n])} for n,p in genomes.items()])
     else:
         source = Path(args.distances)
         kind = args.input_kind
